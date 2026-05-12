@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Stellar DeBank</title>
+  <title>Stellar Moonshot Bank</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/stellar-freighter-api/2.0.0/index.min.js"></script>
   <style>
     :root {
@@ -1052,7 +1052,7 @@
   <div class="header">
     <div class="logo">
       <div class="logo-icon">S</div>
-      Stellar DeBank
+      Stellar Moonshot Bank
     </div>
     <div class="search-container">
       <div class="search-box">
@@ -1079,7 +1079,7 @@
 
   <div class="main" id="app">
     <div class="welcome" id="welcomeState">
-      <h1>Stellar DeBank</h1>
+      <h1>Stellar Moonshot Bank</h1>
       <p>Full portfolio visibility — track multiple wallets, Soroban DeFi, LP positions, and portfolio value over time.</p>
 
       <div style="display: flex; gap: 16px; justify-content: center; margin-bottom: 32px; flex-wrap: wrap;">
@@ -1257,16 +1257,6 @@
           console.log("Freighter wallet detected");
         }
 
-        // Auto-enter portfolio mode if there are saved wallets
-        try {
-          await loadWalletList();
-          if (walletList.length > 0) {
-            activeView = "all";
-            await loadMultiWalletPortfolio();
-          }
-        } catch (e) {
-          console.log("No saved wallets, showing welcome");
-        }
       }, 500);
     });
 
