@@ -1257,16 +1257,6 @@
           console.log("Freighter wallet detected");
         }
 
-        // Auto-enter portfolio mode if there are saved wallets
-        try {
-          await loadWalletList();
-          if (walletList.length > 0) {
-            activeView = "all";
-            await loadMultiWalletPortfolio();
-          }
-        } catch (e) {
-          console.log("No saved wallets, showing welcome");
-        }
       }, 500);
     });
 

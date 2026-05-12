@@ -266,21 +266,8 @@ app.get("/api/v1/account/:address", async (req, res) => {
       sorobanTokenCount: sorobanTokens.length + discoveredTokens.length,
       subentryCount: account.subentry_count,
       lastModifiedLedger: account.last_modified_ledger,
-      isTracked: historyDb.isTracked(address),
-      snapshotCount: historyDb.getSnapshotCount(address),
       lastUpdated: new Date().toISOString(),
     };
-
-    // Auto-record a snapshot (rate-limited to once per 5 minutes per address)
-    try {
-      const latest = historyDb.getLatestSnapshot(address, "mainnet");
-      const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-      if (!latest || latest.snapshot_at < fiveMinAgo) {
-        historyDb.recordSnapshot(responseData, "mainnet");
-      }
-    } catch (e) {
-      console.error("Snapshot recording error:", e.message);
-    }
 
     res.json(responseData);
   } catch (e) {
