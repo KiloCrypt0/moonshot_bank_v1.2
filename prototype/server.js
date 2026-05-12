@@ -7,6 +7,7 @@ const path = require("path");
 // Soroban integration modules
 const historyDb = require("./lib/history-db");
 const { resolveSorobanTokens, resolveCustomToken, getRegistry } = require("./lib/token-resolver");
+const { discoverSorobanTokens } = require("./lib/contract-discovery");
 const SushiSwapV3Adapter = require("./lib/adapters/sushiswap-v3");
 const SolvProtocolAdapter = require("./lib/adapters/solv-protocol");
 const BlendAdapter = require("./lib/adapters/blend");
@@ -217,6 +218,20 @@ app.get("/api/v1/account/:address", async (req, res) => {
       console.error("Soroban token resolution error:", e.message);
     }
 
+    // ── Auto-discovered Soroban tokens (not in the static registry) ─────────
+    // Scans the wallet's invoke_host_function history for SEP-41 token
+    // contracts and queries balances. Cached per address (5 min default).
+    let discoveredTokens = [];
+    try {
+      discoveredTokens = await discoverSorobanTokens(address);
+      for (const dt of discoveredTokens) {
+        totalValueUSD += dt.valueUSD || 0;
+        balances.push(dt);
+      }
+    } catch (e) {
+      console.error("Soroban token discovery error:", e.message);
+    }
+
     // ── DeFi positions (SushiSwap V3, Solv vaults, etc.) ─────────────────
     const defiPositions = [];
     for (const adapter of PROTOCOL_ADAPTERS) {
@@ -248,7 +263,7 @@ app.get("/api/v1/account/:address", async (req, res) => {
         name: a.name,
         type: a.type,
       })),
-      sorobanTokenCount: sorobanTokens.length,
+      sorobanTokenCount: sorobanTokens.length + discoveredTokens.length,
       subentryCount: account.subentry_count,
       lastModifiedLedger: account.last_modified_ledger,
       isTracked: historyDb.isTracked(address),
@@ -985,6 +1000,15 @@ async function fetchPortfolioForScheduler(address) {
     for (const st of sorobanTokens) {
       totalValueUSD += st.valueUSD || 0;
       balances.push(st);
+    }
+  } catch (e) { /* ignore for scheduler */ }
+
+  // Auto-discovered Soroban tokens (cached, so usually a no-op in the scheduler loop)
+  try {
+    const discoveredTokens = await discoverSorobanTokens(address);
+    for (const dt of discoveredTokens) {
+      totalValueUSD += dt.valueUSD || 0;
+      balances.push(dt);
     }
   } catch (e) { /* ignore for scheduler */ }
 
