@@ -851,6 +851,85 @@
       color: var(--text-muted);
     }
 
+    /* ── NFT gallery ────────────────────────────────────────── */
+    .nft-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 16px;
+      margin-top: 8px;
+    }
+    .nft-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: transform 0.15s, border-color 0.15s;
+    }
+    .nft-card:hover {
+      transform: translateY(-2px);
+      border-color: var(--accent);
+    }
+    .nft-card-image {
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      object-fit: cover;
+      background: var(--bg-secondary);
+      display: block;
+    }
+    .nft-card-image-fallback {
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      background: linear-gradient(135deg, var(--bg-hover), var(--bg-secondary));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text-muted);
+      letter-spacing: 1px;
+    }
+    .nft-card-body {
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .nft-card-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .nft-card-code {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .nft-card-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 6px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .nft-confidence {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .nft-confidence.high { background: rgba(34, 197, 94, 0.15); color: var(--green); }
+    .nft-confidence.med  { background: rgba(234, 179, 8, 0.15); color: var(--yellow); }
+    .nft-confidence.low  { background: rgba(100, 116, 139, 0.15); color: var(--text-muted); }
+
     /* ── Portfolio breakdown bar ────────────────────────────── */
     .breakdown-bar {
       display: flex;
@@ -1113,6 +1192,7 @@
     let currentTab = "tokens";
     let historyData = null;
     let claimableData = null;
+    let nftsData = null;
     let portfolioHistory = null;
     let portfolioHistoryRange = "30d";
     let freighterConnected = false;
@@ -1452,6 +1532,7 @@
           };
           historyData = null;
           claimableData = null;
+          nftsData = null;
           portfolioHistory = null;
           currentTab = "tokens";
 
@@ -1502,6 +1583,9 @@
           </button>
           <button class="tab ${currentTab === "claimable" ? "active" : ""}" onclick="switchTab('claimable')">
             Claimable
+          </button>
+          <button class="tab ${currentTab === "nfts" ? "active" : ""}" onclick="switchTab('nfts')">
+            NFTs
           </button>
         </div>
         <div id="tabContent"></div>
@@ -1750,6 +1834,7 @@
         currentData = await res.json();
         historyData = null;
         claimableData = null;
+        nftsData = null;
         portfolioHistory = null;
         currentTab = "tokens";
         renderPortfolio();
@@ -1874,6 +1959,9 @@
           <button class="tab ${currentTab === "claimable" ? "active" : ""}" onclick="switchTab('claimable')">
             Claimable
           </button>
+          <button class="tab ${currentTab === "nfts" ? "active" : ""}" onclick="switchTab('nfts')">
+            NFTs
+          </button>
         </div>
 
         <div id="tabContent"></div>
@@ -1905,6 +1993,8 @@
         await renderHistory(container);
       } else if (currentTab === "claimable") {
         await renderClaimable(container);
+      } else if (currentTab === "nfts") {
+        await renderNfts(container);
       }
     }
 
@@ -2542,6 +2632,82 @@
       });
       html += "</div>";
       container.innerHTML = html;
+    }
+
+    // ── Render NFTs ───────────────────────────────────────────
+    async function renderNfts(container) {
+      if (!nftsData) {
+        container.innerHTML = '<div class="loading"><div class="spinner"></div><div style="color:var(--text-secondary)">Scanning balances and resolving issuer metadata…</div></div>';
+        try {
+          const res = await fetch(`${API_BASE}/api/v1/account/${currentData.address}/nfts`);
+          nftsData = await res.json();
+        } catch (e) {
+          container.innerHTML = '<div class="error-banner">Failed to load NFTs</div>';
+          return;
+        }
+      }
+
+      const nfts = nftsData.nfts || [];
+      if (nfts.length === 0) {
+        container.innerHTML = `
+          <div class="empty-state">
+            No NFTs detected.
+            <div style="font-size: 12px; margin-top: 6px;">
+              We classify a holding as an NFT when supply is small and the issuer publishes SEP-1 metadata.
+            </div>
+          </div>`;
+        return;
+      }
+
+      const cards = nfts.map((n) => {
+        const name = (n.metadata && n.metadata.name) || n.asset.code;
+        const code = n.asset.code;
+        const image = n.metadata && n.metadata.image;
+        const confidenceClass = n.confidence >= 0.7 ? "high" : n.confidence >= 0.5 ? "med" : "low";
+        const confidenceLabel = n.confidence >= 0.7 ? "Likely" : n.confidence >= 0.5 ? "Probable" : "Maybe";
+        const supplyLabel = n.supply !== null && n.supply !== undefined
+          ? `supply ${n.supply <= 1 ? n.supply : fmt(n.supply, 0)}`
+          : "supply unknown";
+
+        const imageHtml = image
+          ? `<img class="nft-card-image" src="${escapeHtml(image)}" alt="${escapeHtml(name)}" loading="lazy" onerror="this.outerHTML='<div class=&quot;nft-card-image-fallback&quot;>'+this.alt.slice(0,2).toUpperCase()+'</div>'">`
+          : `<div class="nft-card-image-fallback">${escapeHtml(code.slice(0, 2).toUpperCase())}</div>`;
+
+        const domain = n.asset.domain
+          ? `<a href="https://${escapeHtml(n.asset.domain)}" target="_blank" rel="noopener" style="color: var(--text-muted); text-decoration: none;">${escapeHtml(n.asset.domain)}</a>`
+          : "no domain";
+
+        return `
+          <div class="nft-card">
+            ${imageHtml}
+            <div class="nft-card-body">
+              <div class="nft-card-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
+              <div class="nft-card-code">${escapeHtml(code)} · ${escapeHtml(shortenAddr(n.asset.issuer))}</div>
+              <div class="nft-card-meta">
+                <span>${domain}</span>
+                <span class="nft-confidence ${confidenceClass}">${confidenceLabel}</span>
+              </div>
+              <div class="nft-card-meta">
+                <span>${supplyLabel}</span>
+                <span>bal ${escapeHtml(n.balance)}</span>
+              </div>
+            </div>
+          </div>`;
+      }).join("");
+
+      container.innerHTML = `<div class="nft-grid">${cards}</div>`;
+    }
+
+    // Minimal HTML escaper for untrusted metadata fields (stellar.toml content
+    // is controlled by issuers and can contain anything).
+    function escapeHtml(s) {
+      if (s === null || s === undefined) return "";
+      return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
     }
   </script>
 </body>

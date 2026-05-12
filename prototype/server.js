@@ -13,6 +13,7 @@ const BlendAdapter = require("./lib/adapters/blend");
 const AquariusAdapter = require("./lib/adapters/aquarius");
 const TemplarAdapter = require("./lib/adapters/templar");
 const snapshotScheduler = require("./lib/snapshot-scheduler");
+const { resolveNfts } = require("./lib/nft-resolver");
 
 const app = express();
 app.use(cors());
@@ -371,6 +372,28 @@ app.get("/api/v1/account/:address/claimable", async (req, res) => {
   } catch (e) {
     console.error("Claimable balance error:", e.message);
     res.status(500).json({ error: "Failed to fetch claimable balances" });
+  }
+});
+
+// NFT holdings — classic Stellar assets that look like NFTs, with SEP-1/SEP-39
+// metadata resolved from the issuer's stellar.toml where available.
+app.get("/api/v1/account/:address/nfts", async (req, res) => {
+  try {
+    const { address } = req.params;
+    const h = getHorizon();
+    const account = await h.loadAccount(address);
+
+    const nfts = await resolveNfts(h, account.balances);
+    res.json({
+      address,
+      count: nfts.length,
+      nfts,
+      // Surface the threshold so a future UI toggle can show "maybe" entries
+      confidenceCutoff: 0.35,
+    });
+  } catch (e) {
+    console.error("NFT fetch error:", e.message);
+    res.status(500).json({ error: "Failed to fetch NFTs" });
   }
 });
 
