@@ -1,8 +1,0 @@
-[phases.setup]
-nixPkgs = ["nodejs"]
-
-[phases.install]
-cmds = ["cd prototype && npm install"]
-
-[start]
-cmd = "cd prototype && node server.js"

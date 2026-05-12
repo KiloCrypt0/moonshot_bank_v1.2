@@ -1,0 +1,1 @@
+{"name":"stellar-debank","scripts":{"start":"node prototype/server.js","build":"cd prototype && npm install"}}
