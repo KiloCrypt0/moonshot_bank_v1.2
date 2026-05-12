@@ -1028,7 +1028,7 @@ snapshotScheduler.init(fetchPortfolioForScheduler);
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
-  console.log(`Stellar DeBank API running on http://localhost:${PORT}`);
+  console.log(`Stellar Moonshot Bank API running on http://localhost:${PORT}`);
   console.log(`Dashboard: http://localhost:${PORT}`);
 
   // Start background snapshot scheduler
