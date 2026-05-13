@@ -288,6 +288,32 @@ function getTokenHistory(address, network, assetCode, range = "30d") {
 }
 
 /**
+ * Get the snapshot closest to a given ISO timestamp.
+ * Returns the snapshot + its token breakdown.
+ */
+function getSnapshotAtDate(address, isoDate, network = "mainnet") {
+  // Find the single snapshot closest to the requested timestamp
+  const snap = db.prepare(`
+    SELECT *, ABS(strftime('%s', snapshot_at) - strftime('%s', ?)) AS dist
+    FROM portfolio_snapshots
+    WHERE address = ? AND network = ?
+    ORDER BY dist ASC
+    LIMIT 1
+  `).get(isoDate, address, network);
+
+  if (!snap) return null;
+
+  // Get the token breakdown for that snapshot
+  const tokens = db.prepare(`
+    SELECT asset_code, asset_issuer, contract_id, balance, value_usd, price_usd
+    FROM token_snapshots
+    WHERE snapshot_id = ?
+  `).all(snap.id);
+
+  return { ...snap, tokens };
+}
+
+/**
  * Get the latest snapshot for an address.
  */
 function getLatestSnapshot(address, network = "mainnet") {
@@ -397,6 +423,7 @@ module.exports = {
   getHistory,
   getTokenHistory,
   getLatestSnapshot,
+  getSnapshotAtDate,
   getSnapshotCount,
   cleanupOldSnapshots,
   downsample,

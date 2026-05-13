@@ -306,6 +306,154 @@
       font-size: 14px;
     }
 
+    /* ── Time Travel Date Picker ─────────────────────────────── */
+    .time-travel-bar {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 20px;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .time-travel-bar label {
+      font-size: 13px;
+      color: var(--text-secondary);
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    .time-travel-bar input[type="datetime-local"] {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-primary);
+      padding: 8px 12px;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+    }
+    .time-travel-bar input[type="datetime-local"]:focus {
+      border-color: var(--accent);
+    }
+    .time-travel-bar input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+      filter: invert(0.7);
+      cursor: pointer;
+    }
+    .time-travel-bar .btn-sm {
+      padding: 8px 16px;
+      font-size: 13px;
+      border-radius: 8px;
+      cursor: pointer;
+      border: none;
+      font-weight: 500;
+    }
+    .time-travel-bar .btn-go {
+      background: var(--accent);
+      color: white;
+    }
+    .time-travel-bar .btn-go:hover { background: var(--accent-light); }
+    .time-travel-bar .btn-back-to-live {
+      background: var(--bg-hover);
+      color: var(--text-secondary);
+      border: 1px solid var(--border);
+    }
+    .time-travel-bar .btn-back-to-live:hover { color: var(--text-primary); }
+    .time-travel-badge {
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-weight: 600;
+    }
+    .time-travel-badge.live {
+      background: rgba(34, 197, 94, 0.15);
+      color: var(--green);
+    }
+    .time-travel-badge.historical {
+      background: rgba(234, 179, 8, 0.15);
+      color: var(--yellow);
+    }
+    .time-travel-info {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-left: auto;
+    }
+
+    /* ── Time Travel Date Picker ─────────────────────────────── */
+    .time-travel-bar {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 20px;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .time-travel-bar label {
+      font-size: 13px;
+      color: var(--text-secondary);
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    .time-travel-bar input[type="datetime-local"] {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-primary);
+      padding: 8px 12px;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+    }
+    .time-travel-bar input[type="datetime-local"]:focus {
+      border-color: var(--accent);
+    }
+    .time-travel-bar input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+      filter: invert(0.7);
+      cursor: pointer;
+    }
+    .time-travel-bar .btn-sm {
+      padding: 8px 16px;
+      font-size: 13px;
+      border-radius: 8px;
+      cursor: pointer;
+      border: none;
+      font-weight: 500;
+    }
+    .time-travel-bar .btn-go {
+      background: var(--accent);
+      color: white;
+    }
+    .time-travel-bar .btn-go:hover { background: var(--accent-light); }
+    .time-travel-bar .btn-back-to-live {
+      background: var(--bg-hover);
+      color: var(--text-secondary);
+      border: 1px solid var(--border);
+    }
+    .time-travel-bar .btn-back-to-live:hover { color: var(--text-primary); }
+    .time-travel-badge {
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-weight: 600;
+    }
+    .time-travel-badge.live {
+      background: rgba(34, 197, 94, 0.15);
+      color: var(--green);
+    }
+    .time-travel-badge.historical {
+      background: rgba(234, 179, 8, 0.15);
+      color: var(--yellow);
+    }
+    .time-travel-info {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-left: auto;
+    }
+
     /* ── Portfolio Header ──────────────────────────────────── */
     .portfolio-header {
       display: flex;
@@ -851,6 +999,85 @@
       color: var(--text-muted);
     }
 
+    /* ── NFT gallery ────────────────────────────────────────── */
+    .nft-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 16px;
+      margin-top: 8px;
+    }
+    .nft-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: transform 0.15s, border-color 0.15s;
+    }
+    .nft-card:hover {
+      transform: translateY(-2px);
+      border-color: var(--accent);
+    }
+    .nft-card-image {
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      object-fit: cover;
+      background: var(--bg-secondary);
+      display: block;
+    }
+    .nft-card-image-fallback {
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      background: linear-gradient(135deg, var(--bg-hover), var(--bg-secondary));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text-muted);
+      letter-spacing: 1px;
+    }
+    .nft-card-body {
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .nft-card-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .nft-card-code {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .nft-card-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 6px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .nft-confidence {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .nft-confidence.high { background: rgba(34, 197, 94, 0.15); color: var(--green); }
+    .nft-confidence.med  { background: rgba(234, 179, 8, 0.15); color: var(--yellow); }
+    .nft-confidence.low  { background: rgba(100, 116, 139, 0.15); color: var(--text-muted); }
+
     /* ── Portfolio breakdown bar ────────────────────────────── */
     .breakdown-bar {
       display: flex;
@@ -1188,7 +1415,7 @@
   </div>
 
   <div class="header">
-    <div class="logo" onclick="goHome()" style="cursor:pointer;">
+    <div class="logo" onclick="goHome()" style="cursor:pointer;" title="Back to home">
       <img src="/stellar-mark.png" alt="Stellar" style="width:30px;height:30px;object-fit:contain;filter:invert(1);flex-shrink:0;" />
       Stellar Moonshot Bank
     </div>
@@ -1196,7 +1423,7 @@
       <div class="search-box">
         <input type="text" id="addressInput" placeholder="Enter Stellar address (G...)" spellcheck="false" />
         <button class="btn" id="searchBtn" onclick="loadPortfolio()">Look Up</button>
-        <button class="btn btn-secondary" id="addToPortfolioBtn" onclick="addCurrentToPortfolio()" title="Add to portfolio" style="padding: 12px 14px;">+</button>
+        <button class="btn btn-secondary" id="addToPortfolioBtn" onclick="addCurrentToPortfolio()" title="Add this address to your portfolio" style="padding: 12px 14px; font-size: 13px;">+ Save</button>
       </div>
     </div>
     <div class="header-right">
@@ -1294,6 +1521,7 @@
     let currentTab = "tokens";
     let historyData = null;
     let claimableData = null;
+    let nftsData = null;
     let portfolioHistory = null;
     let portfolioHistoryRange = "30d";
     let freighterConnected = false;
@@ -1305,8 +1533,11 @@
     let portfolioData = null;      // Aggregated portfolio response
     let activeView = "all";        // "all" or a specific wallet address
     let multiWalletMode = false;   // Whether we're in portfolio mode
+    let timeTravelDate = null;      // null = live, ISO string = historical
+    let timeTravelSnapshot = null;  // Snapshot data when viewing historical
 
     const API_BASE = window.location.origin;
+    const WELCOME_HTML = document.getElementById("app").innerHTML; // Save initial welcome screen
 
     const WALLET_COLORS = [
       "linear-gradient(135deg, #6366f1, #8b5cf6)",
@@ -1638,9 +1869,18 @@
         </div>
       </div>`;
 
+      // If in time-travel mode, show historical view instead of live
+      if (timeTravelDate && timeTravelSnapshot) {
+        app.innerHTML = walletPanelHTML;
+        const ttDiv = document.createElement("div");
+        ttDiv.innerHTML = buildTimeTravelBar() + renderTimeTravelContent(timeTravelSnapshot);
+        app.appendChild(ttDiv);
+        return;
+      }
+
       // Now render the portfolio content based on activeView
       if (activeView === "all") {
-        app.innerHTML = walletPanelHTML + renderAggregatedContent(d);
+        app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent(d);
       } else {
         const walletData = d.wallets.find((w) => w.address === activeView);
         if (walletData) {
@@ -1656,11 +1896,12 @@
           };
           historyData = null;
           claimableData = null;
+          nftsData = null;
           portfolioHistory = null;
           currentTab = "tokens";
 
           // Render wallet panel + single wallet view
-          app.innerHTML = walletPanelHTML + `<div id="singleWalletView"></div>`;
+          app.innerHTML = walletPanelHTML + buildTimeTravelBar() + `<div id="singleWalletView"></div>`;
           renderSingleWalletInPanel();
         } else {
           app.innerHTML = walletPanelHTML + `<div class="empty-state">Wallet not found</div>`;
@@ -1706,6 +1947,9 @@
           </button>
           <button class="tab ${currentTab === "claimable" ? "active" : ""}" onclick="switchTab('claimable')">
             Claimable
+          </button>
+          <button class="tab ${currentTab === "nfts" ? "active" : ""}" onclick="switchTab('nfts')">
+            NFTs
           </button>
         </div>
         <div id="tabContent"></div>
@@ -1840,7 +2084,12 @@
     async function addCurrentToPortfolio() {
       const input = document.getElementById("addressInput");
       const address = input.value.trim();
-      if (!address) return;
+      if (!address) {
+        input.focus();
+        input.setAttribute("placeholder", "Enter a Stellar address first, then click +");
+        setTimeout(() => input.setAttribute("placeholder", "Enter Stellar address (G...)"), 3000);
+        return;
+      }
       const label = prompt("Label for this wallet (optional):", "");
       if (await addWalletToPortfolio(address, label)) {
         alert("Wallet added to portfolio!");
@@ -1848,6 +2097,21 @@
     }
 
     // ── Portfolio Mode Entry ────────────────────────────────────
+
+    function goHome() {
+      currentData = null;
+      historyData = null;
+      claimableData = null;
+      portfolioHistory = null;
+      portfolioData = null;
+      multiWalletMode = false;
+      timeTravelDate = null;
+      timeTravelSnapshot = null;
+      currentTab = "tokens";
+      const input = document.getElementById("addressInput");
+      if (input) input.value = "";
+      document.getElementById("app").innerHTML = WELCOME_HTML;
+    }
 
     async function enterPortfolioMode() {
       await loadWalletList();
@@ -1916,6 +2180,127 @@
       return days + "d ago";
     }
 
+    // ── Time Travel ──────────────────────────────────────────
+    function buildTimeTravelBar() {
+      const nowLocal = new Date();
+      nowLocal.setMinutes(nowLocal.getMinutes() - nowLocal.getTimezoneOffset());
+      const maxDate = nowLocal.toISOString().slice(0, 16);
+
+      const badge = timeTravelDate
+        ? `<span class="time-travel-badge historical">Historical</span>`
+        : `<span class="time-travel-badge live">Live</span>`;
+
+      const info = timeTravelSnapshot
+        ? `<span class="time-travel-info">Showing snapshot from ${new Date(timeTravelSnapshot.snapshotDate).toLocaleString()}</span>`
+        : "";
+
+      const backBtn = timeTravelDate
+        ? `<button class="btn-sm btn-back-to-live" onclick="backToLive()">Back to Live</button>`
+        : "";
+
+      return `
+        <div class="time-travel-bar">
+          ${badge}
+          <label>View balances at:</label>
+          <input type="datetime-local" id="timeTravelInput" max="${maxDate}"
+            value="${timeTravelDate || ""}" />
+          <button class="btn-sm btn-go" onclick="goToDate()">Go</button>
+          ${backBtn}
+          ${info}
+        </div>
+      `;
+    }
+
+    async function goToDate() {
+      const input = document.getElementById("timeTravelInput");
+      if (!input || !input.value) return;
+
+      const isoDate = new Date(input.value).toISOString();
+
+      // Determine which address to query
+      let address;
+      if (multiWalletMode) {
+        address = activeView !== "all" ? activeView : (walletList[0]?.address || null);
+      } else {
+        address = currentData?.address || currentAddress;
+      }
+
+      if (!address) {
+        alert("Select a specific wallet first (time travel works per-wallet).");
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/account/${address}/snapshot-at?date=${encodeURIComponent(isoDate)}`);
+        const data = await res.json();
+
+        if (!data.found) {
+          alert("No snapshots found for this wallet yet. Snapshots are recorded after you add the wallet and the scheduler runs.");
+          return;
+        }
+
+        timeTravelDate = input.value;
+        timeTravelSnapshot = data;
+
+        if (multiWalletMode) {
+          renderMultiWalletView();
+        } else {
+          const app = document.getElementById("app");
+          app.innerHTML = buildTimeTravelBar() + renderTimeTravelContent(data);
+        }
+      } catch (e) {
+        console.error("Time travel error:", e);
+        alert("Failed to fetch historical snapshot.");
+      }
+    }
+
+    function backToLive() {
+      timeTravelDate = null;
+      timeTravelSnapshot = null;
+      if (multiWalletMode) {
+        renderMultiWalletView();
+      } else {
+        renderPortfolio();
+      }
+    }
+
+    function renderTimeTravelContent(snap) {
+      const tokensHTML = snap.tokens.length > 0
+        ? snap.tokens.map(t => `
+          <div class="token-row">
+            <div class="token-info">
+              <div class="token-icon">${(t.asset || "?")[0]}</div>
+              <div>
+                <div class="token-name">${t.asset}</div>
+                <div class="token-balance">${fmt(t.balance, 4)}</div>
+              </div>
+            </div>
+            <div class="token-value">
+              <div>${t.valueUSD > 0 ? fmtUSD(t.valueUSD) : '<span class="unpriced">No price</span>'}</div>
+              ${t.priceUSD > 0 ? `<div class="token-price">$${fmt(t.priceUSD, 4)}</div>` : ""}
+            </div>
+          </div>
+        `).join("")
+        : `<div style="text-align:center; color: var(--text-muted); padding: 40px;">No token data in this snapshot</div>`;
+
+      return `
+        <div class="portfolio-header">
+          <div>
+            <div class="portfolio-address">${snap.address}</div>
+            <div class="portfolio-value">${fmtBigUSD(snap.totalValueUSD)}</div>
+            <div class="portfolio-meta">
+              <div class="meta-item">Assets: <span>${snap.tokenCount}</span></div>
+              <div class="meta-item">DeFi: <span>${snap.defiPositionCount}</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">Balances at ${new Date(snap.snapshotDate).toLocaleString()}</div>
+          ${tokensHTML}
+        </div>
+      `;
+    }
+
     function getTokenColor(code, i) {
       const colors = ["#6366f1", "#3b82f6", "#22c55e", "#eab308", "#ef4444", "#a855f7", "#f97316", "#14b8a6", "#ec4899", "#8b5cf6"];
       if (code === "XLM") return "#4c6ef5";
@@ -1954,6 +2339,7 @@
         currentData = await res.json();
         historyData = null;
         claimableData = null;
+        nftsData = null;
         portfolioHistory = null;
         currentTab = "tokens";
         renderPortfolio();
@@ -2011,6 +2397,7 @@
       const xlmBal = d.balances.find((b) => b.type === "native");
 
       app.innerHTML = `
+        ${buildTimeTravelBar()}
         <div class="portfolio-header">
           <div>
             <div class="portfolio-address">${d.address}</div>
@@ -2078,6 +2465,9 @@
           <button class="tab ${currentTab === "claimable" ? "active" : ""}" onclick="switchTab('claimable')">
             Claimable
           </button>
+          <button class="tab ${currentTab === "nfts" ? "active" : ""}" onclick="switchTab('nfts')">
+            NFTs
+          </button>
         </div>
 
         <div id="tabContent"></div>
@@ -2109,6 +2499,8 @@
         await renderHistory(container);
       } else if (currentTab === "claimable") {
         await renderClaimable(container);
+      } else if (currentTab === "nfts") {
+        await renderNfts(container);
       }
     }
 
@@ -2746,6 +3138,129 @@
       });
       html += "</div>";
       container.innerHTML = html;
+    }
+
+    // ── Render NFTs ───────────────────────────────────────────
+    async function renderNfts(container) {
+      if (!nftsData) {
+        container.innerHTML = '<div class="loading"><div class="spinner"></div><div style="color:var(--text-secondary)">Scanning balances and resolving issuer metadata… <br/><span style="font-size:11px">(checking classic assets + Soroban contracts)</span></div></div>';
+        try {
+          // Fire both requests in parallel: SEP-39 classic-asset NFTs and
+          // SEP-50 Soroban-contract NFTs (incl. Meridian Pay).
+          const [classicRes, sorobanRes] = await Promise.all([
+            fetch(`${API_BASE}/api/v1/account/${currentData.address}/nfts`).then((r) => r.json()).catch(() => ({ nfts: [] })),
+            fetch(`${API_BASE}/api/v1/account/${currentData.address}/collectibles`).then((r) => r.json()).catch(() => ({ collections: [] })),
+          ]);
+          nftsData = { classic: classicRes, soroban: sorobanRes };
+        } catch (e) {
+          container.innerHTML = '<div class="error-banner">Failed to load NFTs</div>';
+          return;
+        }
+      }
+
+      const classicNfts = (nftsData.classic && nftsData.classic.nfts) || [];
+      const sorobanCollections = (nftsData.soroban && nftsData.soroban.collections) || [];
+      const sorobanItemCount = sorobanCollections.reduce((sum, c) => sum + c.count, 0);
+      const totalCount = classicNfts.length + sorobanItemCount;
+
+      if (totalCount === 0) {
+        container.innerHTML = `
+          <div class="empty-state">
+            No NFTs detected.
+            <div style="font-size: 12px; margin-top: 6px;">
+              Checked classic Stellar assets (SEP-39) and Soroban smart-contract collections (SEP-50).
+            </div>
+          </div>`;
+        return;
+      }
+
+      let html = "";
+
+      // ── Soroban (SEP-50) collections — group by collection ──
+      for (const col of sorobanCollections) {
+        html += `
+          <div style="margin-top: 8px; margin-bottom: 16px;">
+            <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:12px;">
+              <div>
+                <div style="font-size:16px; font-weight:600; color:var(--text-primary);">${escapeHtml(col.name)}</div>
+                <div style="font-size:11px; color:var(--text-muted); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; margin-top:2px;">
+                  ${escapeHtml(col.symbol)} · ${escapeHtml(shortenAddr(col.address))} · Soroban
+                </div>
+              </div>
+              <div style="font-size:12px; color:var(--text-secondary);">${col.count} item${col.count === 1 ? "" : "s"}</div>
+            </div>
+            <div class="nft-grid">
+              ${col.items.map((item) => {
+                const name = (item.metadata && item.metadata.name) || `#${item.tokenId}`;
+                const image = item.metadata && item.metadata.image;
+                const desc = (item.metadata && item.metadata.description) || "";
+
+                const imageHtml = image
+                  ? `<img class="nft-card-image" src="${escapeHtml(image)}" alt="${escapeHtml(name)}" loading="lazy" onerror="this.outerHTML='<div class=&quot;nft-card-image-fallback&quot;>NFT</div>'">`
+                  : `<div class="nft-card-image-fallback">#${escapeHtml(item.tokenId)}</div>`;
+
+                return `
+                  <div class="nft-card">
+                    ${imageHtml}
+                    <div class="nft-card-body">
+                      <div class="nft-card-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
+                      <div class="nft-card-code">Token #${escapeHtml(item.tokenId)}</div>
+                      ${desc ? `<div class="nft-card-meta" style="display:block; font-size:11px; line-height:1.4; margin-top:6px; color:var(--text-muted);">${escapeHtml(desc.length > 100 ? desc.slice(0, 100) + "…" : desc)}</div>` : ""}
+                    </div>
+                  </div>`;
+              }).join("")}
+            </div>
+          </div>`;
+      }
+
+      // ── Classic SEP-39 NFTs (with confidence heuristic) ──
+      if (classicNfts.length > 0) {
+        html += `
+          <div style="margin-top: 24px; margin-bottom: 12px;">
+            <div style="font-size:16px; font-weight:600; color:var(--text-primary);">Classic Stellar NFTs</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">SEP-39 trustline assets with NFT-like properties</div>
+          </div>
+          <div class="nft-grid">
+            ${classicNfts.map((n) => {
+              const name = (n.metadata && n.metadata.name) || n.asset.code;
+              const code = n.asset.code;
+              const image = n.metadata && n.metadata.image;
+              const confidenceClass = n.confidence >= 0.7 ? "high" : n.confidence >= 0.5 ? "med" : "low";
+              const confidenceLabel = n.confidence >= 0.7 ? "Likely" : n.confidence >= 0.5 ? "Probable" : "Maybe";
+
+              const imageHtml = image
+                ? `<img class="nft-card-image" src="${escapeHtml(image)}" alt="${escapeHtml(name)}" loading="lazy" onerror="this.outerHTML='<div class=&quot;nft-card-image-fallback&quot;>'+this.alt.slice(0,2).toUpperCase()+'</div>'">`
+                : `<div class="nft-card-image-fallback">${escapeHtml(code.slice(0, 2).toUpperCase())}</div>`;
+
+              return `
+                <div class="nft-card">
+                  ${imageHtml}
+                  <div class="nft-card-body">
+                    <div class="nft-card-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
+                    <div class="nft-card-code">${escapeHtml(code)} · ${escapeHtml(shortenAddr(n.asset.issuer))}</div>
+                    <div class="nft-card-meta">
+                      <span>${n.asset.domain ? escapeHtml(n.asset.domain) : "no domain"}</span>
+                      <span class="nft-confidence ${confidenceClass}">${confidenceLabel}</span>
+                    </div>
+                  </div>
+                </div>`;
+            }).join("")}
+          </div>`;
+      }
+
+      container.innerHTML = html;
+    }
+
+    // Minimal HTML escaper for untrusted metadata fields (stellar.toml content
+    // is controlled by issuers and can contain anything).
+    function escapeHtml(s) {
+      if (s === null || s === undefined) return "";
+      return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
     }
   </script>
 </body>
