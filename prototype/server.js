@@ -8,6 +8,7 @@ const path = require("path");
 const historyDb = require("./lib/history-db");
 const { resolveSorobanTokens, resolveCustomToken, getRegistry } = require("./lib/token-resolver");
 const { discoverSorobanTokens } = require("./lib/contract-discovery");
+const pricingEngine = require("./lib/pricing-engine");
 const SushiSwapV3Adapter = require("./lib/adapters/sushiswap-v3");
 const SolvProtocolAdapter = require("./lib/adapters/solv-protocol");
 const BlendAdapter = require("./lib/adapters/blend");
@@ -179,11 +180,12 @@ app.get("/api/v1/account/:address", async (req, res) => {
         let price = null;
         let valueUSD = 0;
 
-        if (isStablecoin(code, issuer)) {
-          price = { usd: STABLECOINS[`${code}:${issuer}`], change24h: 0 };
-          valueUSD = amount * price.usd;
-        } else if (amount > 0) {
-          price = await getAssetPriceViaSDEX(code, issuer);
+        if (amount > 0) {
+          price = await pricingEngine.priceClassicAsset(
+            { priceViaSDEX: getAssetPriceViaSDEX },
+            code,
+            issuer
+          );
           if (price) valueUSD = amount * price.usd;
         }
 
@@ -601,9 +603,7 @@ app.get("/api/v1/account/:address/token-history/:assetCode", (req, res) => {
     console.error("Token history error:", e.message);
     res.status(500).json({ error: "Failed to fetch token history" });
   }
-});
-
-// Get snapshot closest to a specific date/time
+});// Get snapshot closest to a specific date/time
 app.get("/api/v1/account/:address/snapshot-at", (req, res) => {
   try {
     const { address } = req.params;
@@ -801,11 +801,12 @@ app.post("/api/v1/portfolio", async (req, res) => {
             let price = null;
             let valueUSD = 0;
 
-            if (isStablecoin(code, issuer)) {
-              price = { usd: STABLECOINS[`${code}:${issuer}`], change24h: 0 };
-              valueUSD = amount * price.usd;
-            } else if (amount > 0) {
-              price = await getAssetPriceViaSDEX(code, issuer);
+            if (amount > 0) {
+              price = await pricingEngine.priceClassicAsset(
+                { priceViaSDEX: getAssetPriceViaSDEX },
+                code,
+                issuer
+              );
               if (price) valueUSD = amount * price.usd;
             }
 
@@ -1096,11 +1097,12 @@ async function fetchPortfolioForScheduler(address) {
       let price = null;
       let valueUSD = 0;
 
-      if (isStablecoin(code, issuer)) {
-        price = { usd: STABLECOINS[`${code}:${issuer}`], change24h: 0 };
-        valueUSD = amount * price.usd;
-      } else if (amount > 0) {
-        price = await getAssetPriceViaSDEX(code, issuer);
+      if (amount > 0) {
+        price = await pricingEngine.priceClassicAsset(
+          { priceViaSDEX: getAssetPriceViaSDEX },
+          code,
+          issuer
+        );
         if (price) valueUSD = amount * price.usd;
       }
 
