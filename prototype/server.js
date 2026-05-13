@@ -14,6 +14,8 @@ const BlendAdapter = require("./lib/adapters/blend");
 const AquariusAdapter = require("./lib/adapters/aquarius");
 const TemplarAdapter = require("./lib/adapters/templar");
 const snapshotScheduler = require("./lib/snapshot-scheduler");
+const { resolveNfts } = require("./lib/nft-resolver");
+const { resolveSorobanCollectibles } = require("./lib/collectibles-resolver");
 
 const app = express();
 app.use(cors());
@@ -373,6 +375,43 @@ app.get("/api/v1/account/:address/claimable", async (req, res) => {
   } catch (e) {
     console.error("Claimable balance error:", e.message);
     res.status(500).json({ error: "Failed to fetch claimable balances" });
+  }
+});
+
+// NFT holdings — classic Stellar assets that look like NFTs, with SEP-1/SEP-39
+// metadata resolved from the issuer's stellar.toml where available.
+app.get("/api/v1/account/:address/nfts", async (req, res) => {
+  try {
+    const { address } = req.params;
+    const h = getHorizon();
+    const account = await h.loadAccount(address);
+
+    const nfts = await resolveNfts(h, account.balances);
+    res.json({
+      address,
+      count: nfts.length,
+      nfts,
+      // Surface the threshold so a future UI toggle can show "maybe" entries
+      confidenceCutoff: 0.35,
+    });
+  } catch (e) {
+    console.error("NFT fetch error:", e.message);
+    res.status(500).json({ error: "Failed to fetch NFTs" });
+  }
+});
+
+// Soroban contract NFTs (SEP-50, including Meridian Pay collections).
+// Proxies SDF's official Freighter backend rather than reimplementing Soroban
+// RPC token enumeration. See lib/collectibles-resolver.js for the full
+// rationale and source-code references.
+app.get("/api/v1/account/:address/collectibles", async (req, res) => {
+  try {
+    const { address } = req.params;
+    const result = await resolveSorobanCollectibles(address);
+    res.json({ address, ...result });
+  } catch (e) {
+    console.error("Collectibles fetch error:", e.message);
+    res.status(502).json({ error: "Failed to fetch collectibles", detail: e.message });
   }
 });
 
