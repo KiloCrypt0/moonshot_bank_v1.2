@@ -7,12 +7,15 @@ const path = require("path");
 // Soroban integration modules
 const historyDb = require("./lib/history-db");
 const { resolveSorobanTokens, resolveCustomToken, getRegistry } = require("./lib/token-resolver");
+const { discoverSorobanTokens } = require("./lib/contract-discovery");
+const pricingEngine = require("./lib/pricing-engine");
 const SushiSwapV3Adapter = require("./lib/adapters/sushiswap-v3");
 const SolvProtocolAdapter = require("./lib/adapters/solv-protocol");
 const BlendAdapter = require("./lib/adapters/blend");
 const AquariusAdapter = require("./lib/adapters/aquarius");
 const TemplarAdapter = require("./lib/adapters/templar");
 const snapshotScheduler = require("./lib/snapshot-scheduler");
+const createPublicApiRoutes = require("./lib/public-api-routes");
 const { resolveNfts } = require("./lib/nft-resolver");
 const { resolveSorobanCollectibles } = require("./lib/collectibles-resolver");
 const { getTickerPrices } = require("./lib/price-ticker");
@@ -179,11 +182,12 @@ app.get("/api/v1/account/:address", async (req, res) => {
         let price = null;
         let valueUSD = 0;
 
-        if (isStablecoin(code, issuer)) {
-          price = { usd: STABLECOINS[`${code}:${issuer}`], change24h: 0 };
-          valueUSD = amount * price.usd;
-        } else if (amount > 0) {
-          price = await getAssetPriceViaSDEX(code, issuer);
+        if (amount > 0) {
+          price = await pricingEngine.priceClassicAsset(
+            { priceViaSDEX: getAssetPriceViaSDEX },
+            code,
+            issuer
+          );
           if (price) valueUSD = amount * price.usd;
         }
 
@@ -220,6 +224,20 @@ app.get("/api/v1/account/:address", async (req, res) => {
       console.error("Soroban token resolution error:", e.message);
     }
 
+    // ── Auto-discovered Soroban tokens (not in the static registry) ─────────
+    // Scans the wallet's invoke_host_function history for SEP-41 token
+    // contracts and queries balances. Cached per address (5 min default).
+    let discoveredTokens = [];
+    try {
+      discoveredTokens = await discoverSorobanTokens(address);
+      for (const dt of discoveredTokens) {
+        totalValueUSD += dt.valueUSD || 0;
+        balances.push(dt);
+      }
+    } catch (e) {
+      console.error("Soroban token discovery error:", e.message);
+    }
+
     // ── DeFi positions (SushiSwap V3, Solv vaults, etc.) ─────────────────
     const defiPositions = [];
     for (const adapter of PROTOCOL_ADAPTERS) {
@@ -251,24 +269,11 @@ app.get("/api/v1/account/:address", async (req, res) => {
         name: a.name,
         type: a.type,
       })),
-      sorobanTokenCount: sorobanTokens.length,
+      sorobanTokenCount: sorobanTokens.length + discoveredTokens.length,
       subentryCount: account.subentry_count,
       lastModifiedLedger: account.last_modified_ledger,
-      isTracked: historyDb.isTracked(address),
-      snapshotCount: historyDb.getSnapshotCount(address),
       lastUpdated: new Date().toISOString(),
     };
-
-    // Auto-record a snapshot (rate-limited to once per 5 minutes per address)
-    try {
-      const latest = historyDb.getLatestSnapshot(address, "mainnet");
-      const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-      if (!latest || latest.snapshot_at < fiveMinAgo) {
-        historyDb.recordSnapshot(responseData, "mainnet");
-      }
-    } catch (e) {
-      console.error("Snapshot recording error:", e.message);
-    }
 
     res.json(responseData);
   } catch (e) {
@@ -611,6 +616,50 @@ app.get("/api/v1/account/:address/token-history/:assetCode", (req, res) => {
     console.error("Token history error:", e.message);
     res.status(500).json({ error: "Failed to fetch token history" });
   }
+});// Get snapshot closest to a specific date/time
+app.get("/api/v1/account/:address/snapshot-at", (req, res) => {
+  try {
+    const { address } = req.params;
+    const { date } = req.query; // ISO string, e.g. "2026-05-10T14:00:00"
+
+    if (!date) {
+      return res.status(400).json({ error: "Missing ?date= parameter (ISO timestamp)" });
+    }
+
+    const snapshot = historyDb.getSnapshotAtDate(address, date, "mainnet");
+
+    if (!snapshot) {
+      return res.json({
+        address,
+        requestedDate: date,
+        found: false,
+        message: "No snapshots found for this wallet. Snapshots are recorded after you add the wallet.",
+      });
+    }
+
+    res.json({
+      address,
+      requestedDate: date,
+      found: true,
+      snapshotDate: snapshot.snapshot_at,
+      totalValueUSD: snapshot.total_value_usd,
+      xlmBalance: snapshot.xlm_balance,
+      xlmPriceUSD: snapshot.xlm_price_usd,
+      tokenCount: snapshot.token_count,
+      defiPositionCount: snapshot.defi_position_count,
+      tokens: snapshot.tokens.map((t) => ({
+        asset: t.asset_code,
+        issuer: t.asset_issuer,
+        contractId: t.contract_id,
+        balance: t.balance,
+        valueUSD: t.value_usd,
+        priceUSD: t.price_usd,
+      })),
+    });
+  } catch (e) {
+    console.error("Snapshot-at error:", e.message);
+    res.status(500).json({ error: "Failed to fetch snapshot" });
+  }
 });
 
 // Enable/disable tracking for a wallet
@@ -765,11 +814,12 @@ app.post("/api/v1/portfolio", async (req, res) => {
             let price = null;
             let valueUSD = 0;
 
-            if (isStablecoin(code, issuer)) {
-              price = { usd: STABLECOINS[`${code}:${issuer}`], change24h: 0 };
-              valueUSD = amount * price.usd;
-            } else if (amount > 0) {
-              price = await getAssetPriceViaSDEX(code, issuer);
+            if (amount > 0) {
+              price = await pricingEngine.priceClassicAsset(
+                { priceViaSDEX: getAssetPriceViaSDEX },
+                code,
+                issuer
+              );
               if (price) valueUSD = amount * price.usd;
             }
 
@@ -955,6 +1005,254 @@ app.post("/api/v1/history/downsample", (req, res) => {
   }
 });
 
+// Top XLM whales leaderboard
+const EXCLUDED_WHALES = new Set([
+  "GALAXYVOIDAOPZTDLHILAJQKCVVFMD4IKLXLSZV5YHO7VY74IWZILUTO", // burned
+  // SDF mandate addresses
+  "GB6NVEN5HSUBKMYCE5ZOWSK5K23TBWRUQLZY3KNMXUZ3AQ2ESC4MY4AQ",
+  "GATL3ETTZ3XDGFXX2ELPIKCZL7S5D2HY3VK4T7LRPD6DW5JOLAEZSZBA",
+  "GAKGC35HMNB7A3Q2V5SQU6VJC2JFTZB6I7ZW77SJSMRCOX2ZFBGJOCHH",
+  "GAPV2C4BTHXPL2IVYDXJ5PUU7Q3LAXU7OAQDP7KVYHLCNM2JTAJNOQQI",
+  "GCVJDBALC2RQFLD2HYGQGWNFZBCOD2CPOTN3LE7FWRZ44H2WRAVZLFCU",
+  "GC3ITNZSVVPOWZ5BU7S64XKNI5VPTRSBEXXLS67V4K6LEUETWBMTE7IH",
+  "GBEVKAYIPWC5AQT6D4N7FC3XGKRRBMPCAMTO3QZWMHHACLHTMAHAM2TP",
+  "GDUY7J7A33TQWOSOQGDO776GGLM3UQERL4J3SPT56F6YS4ID7MLDERI4",
+  "GCPWKVQNLDPD4RNP5CAXME4BEDTKSSYRR4MMEL4KG65NEGCOGNJW7QI2",
+  "GDKIJJIKXLOM2NRMPNQZUUYK24ZPVFC6426GZAEP3KUK6KEJLACCWNMX",
+  "GDWXQOTIIDO2EUK4DIGIBLEHLME2IAJRNU6JDFS5B2ZTND65P7J36WQZ",
+  "GAMGGUQKKJ637ILVDOSCT5X7HYSZDUPGXSUW67B2UKMG2HEN5TPWN3LQ",
+  "GANII5Y2LABEBK74NWNKS4NREX2T52YTBGQDRVKVBFRIIF5VE4ORYOVY",
+  "GBFZPAHO24P7ZVZCMI5SXZR53UYD325OWSSWWHHVLBNN56LU5YZJJFNP",
+]);
+
+app.get("/api/v1/whales", async (req, res) => {
+  try {
+    // Fetch extra to have enough after filtering
+    const response = await fetch("https://api.stellar.expert/explorer/public/asset/XLM/holders?order=desc&limit=40");
+    const data = await response.json();
+    const records = data._embedded?.records || [];
+
+    const filtered = records
+      .filter(a => !EXCLUDED_WHALES.has(a.address))
+      .slice(0, 10);
+
+    const h = getHorizon();
+    const whales = await Promise.all(filtered.map(async (a) => {
+      const xlmBalance = Math.round(parseInt(a.balance) / 10_000_000);
+      let assetCount = null;
+      try {
+        const account = await h.loadAccount(a.address);
+        assetCount = account.balances.length; // includes native XLM + all trustlines
+      } catch (e) { /* leave null if account can't be loaded */ }
+      return { address: a.address, balance: xlmBalance, assetCount };
+    }));
+
+    res.json({ whales });
+  } catch (e) {
+    console.error("Whales error:", e.message);
+    res.status(500).json({ error: "Failed to fetch whales" });
+  }
+});
+
+// ── Portfolio Whale Scorer ────────────────────────────────────────────────────
+// Strategy:
+//  1. Fetch top holders of each of the 15 tracked assets from Stellar Expert.
+//  2. Union those G... addresses (ignoring dust and contract addresses).
+//  3. Score each candidate: classic assets via Horizon + Soroban balances from
+//     the SE holder data (no extra RPC needed — SE already provides balances).
+//  4. Rank by total non-XLM USD value across ALL assets, return top 10.
+//  Results are cached 30 minutes and refreshed in the background.
+
+const TRACKED_ASSETS = require("./lib/tracked-assets");
+const PORTFOLIO_WHALE_TTL = 30 * 60 * 1000; // 30 minutes
+
+let portfolioWhaleCache = null;
+let portfolioWhaleComputing = false;
+let btcPriceUSD = 80000; // updated live before each compute run
+
+async function refreshBTCPrice() {
+  try {
+    const res = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd");
+    const data = await res.json();
+    if (data?.bitcoin?.usd) btcPriceUSD = data.bitcoin.usd;
+  } catch (e) { /* keep last known price */ }
+}
+
+// Fetch top holders for one asset from Stellar Expert.
+// Returns array of { address, rawBalance } for G... addresses above the dust threshold.
+async function fetchAssetHolders(asset) {
+  const id = asset.kind === "soroban"
+    ? asset.contractId
+    : `${asset.code}-${asset.issuer}`;
+  try {
+    const res = await fetch(
+      `https://api.stellar.expert/explorer/public/asset/${id}/holders?order=desc&limit=200`
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    const records = data._embedded?.records || [];
+    const decPow = Math.pow(10, asset.decimals || 7);
+    return records
+      .filter(r => (r.address || r.account || "").startsWith("G"))
+      .filter(r => parseInt(r.balance || 0) / decPow >= (asset.minTokenBalance || 0))
+      .map(r => ({ address: r.address || r.account, rawBalance: parseInt(r.balance || 0) }));
+  } catch (e) {
+    return [];
+  }
+}
+
+// Score one candidate wallet across only the 15 tracked assets.
+// Scoring against a fixed universe prevents junk/illiquid tokens from
+// inflating values via thin SDEX orderbooks.
+// sorobanBalances: Map<contractId, rawBalance> from SE holder data.
+async function scoreWallet(h, address, sorobanBalances, classicPrices) {
+  let totalUSD = 0;
+  let assetCount = 0;
+
+  // Classic tracked assets — look up Horizon balance, price from pre-fetched map
+  const trackedClassic = TRACKED_ASSETS.filter(a => a.kind === "classic");
+  try {
+    const account = await h.loadAccount(address);
+    for (const asset of trackedClassic) {
+      const bal = account.balances.find(b =>
+        b.asset_code === asset.code && b.asset_issuer === asset.issuer
+      );
+      if (!bal) continue;
+      const amount = parseFloat(bal.balance);
+      if (amount <= 0) continue;
+      const priceUSD = classicPrices.get(`${asset.code}:${asset.issuer}`);
+      if (!priceUSD) continue;
+      totalUSD += amount * priceUSD;
+      assetCount++;
+    }
+  } catch (e) { /* account may not load */ }
+
+  // Soroban tracked assets — use balances already fetched from SE
+  for (const asset of TRACKED_ASSETS.filter(a => a.kind === "soroban")) {
+    const rawBal = sorobanBalances.get(asset.contractId);
+    if (!rawBal || rawBal <= 0) continue;
+    const amount = rawBal / Math.pow(10, asset.decimals || 7);
+    if (amount <= 0) continue;
+    const priceUSD = asset.priceHintUSD === "btc" ? btcPriceUSD : asset.priceHintUSD;
+    if (priceUSD) {
+      totalUSD += amount * priceUSD;
+      assetCount++;
+    }
+  }
+
+  return totalUSD > 0 ? { address, totalUSD, assetCount } : null;
+}
+
+// Fetch USD prices for all classic tracked assets in one CoinGecko batch call.
+// Falls back to priceHintUSD when CoinGecko doesn't have a price.
+async function fetchClassicTrackedPrices() {
+  const classics = TRACKED_ASSETS.filter(a => a.kind === "classic" && a.coingeckoId);
+  const ids = classics.map(a => a.coingeckoId).join(",");
+  const prices = new Map(); // `${code}:${issuer}` → priceUSD
+  try {
+    const res = await fetch(
+      `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`
+    );
+    const data = await res.json();
+    for (const asset of classics) {
+      const usd = data[asset.coingeckoId]?.usd ?? asset.priceHintUSD;
+      if (usd) prices.set(`${asset.code}:${asset.issuer}`, usd);
+    }
+  } catch (e) {
+    // CoinGecko failed — fall back to hints only
+    for (const asset of classics) {
+      if (asset.priceHintUSD) prices.set(`${asset.code}:${asset.issuer}`, asset.priceHintUSD);
+    }
+  }
+  return prices;
+}
+
+async function computePortfolioWhales() {
+  if (portfolioWhaleComputing) return;
+  portfolioWhaleComputing = true;
+  try {
+    await refreshBTCPrice();
+
+    // Step 1: fetch holders + prices in parallel
+    console.log("[portfolio-whales] Fetching holders for all tracked assets...");
+    const [holderLists, classicPrices] = await Promise.all([
+      Promise.all(TRACKED_ASSETS.map(fetchAssetHolders)),
+      fetchClassicTrackedPrices(),
+    ]);
+    console.log(`[portfolio-whales] Classic prices fetched: ${classicPrices.size} assets`);
+
+    // Step 2: build candidate map — address → soroban balances
+    // Also union all G... addresses into a candidate set
+    const sorobanBalanceMap = new Map(); // address → Map<contractId, rawBalance>
+    const candidateSet = new Set();
+
+    TRACKED_ASSETS.forEach((asset, idx) => {
+      for (const { address, rawBalance } of holderLists[idx]) {
+        if (EXCLUDED_WHALES.has(address)) continue;
+        candidateSet.add(address);
+        if (asset.kind === "soroban") {
+          if (!sorobanBalanceMap.has(address)) sorobanBalanceMap.set(address, new Map());
+          sorobanBalanceMap.get(address).set(asset.contractId, rawBalance);
+        }
+      }
+    });
+
+    const candidates = [...candidateSet];
+    console.log(`[portfolio-whales] ${candidates.length} unique candidates across all assets`);
+
+    // Step 3: score each candidate in batches to stay under Horizon rate limits
+    const h = getHorizon();
+    const all = [];
+    const BATCH = 20;
+
+    for (let i = 0; i < candidates.length; i += BATCH) {
+      const batch = candidates.slice(i, i + BATCH);
+      const results = await Promise.all(batch.map(addr =>
+        scoreWallet(h, addr, sorobanBalanceMap.get(addr) || new Map(), classicPrices)
+      ));
+      for (const r of results) { if (r) all.push(r); }
+    }
+
+    const whales = all.sort((a, b) => b.totalUSD - a.totalUSD).slice(0, 10);
+    portfolioWhaleCache = { whales, computedAt: new Date().toISOString() };
+    console.log(`[portfolio-whales] Done. ${whales.length} results, top: $${Math.round(whales[0]?.totalUSD || 0).toLocaleString()}`);
+  } catch (e) {
+    console.error("[portfolio-whales] Compute error:", e.message);
+  } finally {
+    portfolioWhaleComputing = false;
+  }
+}
+
+// Kick off on startup, refresh every 30 minutes
+computePortfolioWhales();
+setInterval(computePortfolioWhales, PORTFOLIO_WHALE_TTL);
+
+app.get("/api/v1/portfolio-whales", async (req, res) => {
+  if (req.query.refresh === "1" && !portfolioWhaleComputing) {
+    computePortfolioWhales();
+  }
+
+  if (!portfolioWhaleCache) {
+    const deadline = Date.now() + 180_000; // wait up to 3 min on first run
+    while (!portfolioWhaleCache && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 500));
+    }
+  }
+
+  if (!portfolioWhaleCache) {
+    return res.status(503).json({ error: "Still computing — try again in a moment" });
+  }
+
+  const stale = Date.now() - new Date(portfolioWhaleCache.computedAt).getTime() > PORTFOLIO_WHALE_TTL;
+  if (stale && !portfolioWhaleComputing) computePortfolioWhales();
+
+  res.json({
+    whales: portfolioWhaleCache.whales,
+    computedAt: portfolioWhaleCache.computedAt,
+    refreshing: portfolioWhaleComputing,
+  });
+});
+
 // Health check
 app.get("/api/health", (req, res) => {
   res.json({
@@ -1011,11 +1309,12 @@ async function fetchPortfolioForScheduler(address) {
       let price = null;
       let valueUSD = 0;
 
-      if (isStablecoin(code, issuer)) {
-        price = { usd: STABLECOINS[`${code}:${issuer}`], change24h: 0 };
-        valueUSD = amount * price.usd;
-      } else if (amount > 0) {
-        price = await getAssetPriceViaSDEX(code, issuer);
+      if (amount > 0) {
+        price = await pricingEngine.priceClassicAsset(
+          { priceViaSDEX: getAssetPriceViaSDEX },
+          code,
+          issuer
+        );
         if (price) valueUSD = amount * price.usd;
       }
 
@@ -1036,6 +1335,15 @@ async function fetchPortfolioForScheduler(address) {
     for (const st of sorobanTokens) {
       totalValueUSD += st.valueUSD || 0;
       balances.push(st);
+    }
+  } catch (e) { /* ignore for scheduler */ }
+
+  // Auto-discovered Soroban tokens (cached, so usually a no-op in the scheduler loop)
+  try {
+    const discoveredTokens = await discoverSorobanTokens(address);
+    for (const dt of discoveredTokens) {
+      totalValueUSD += dt.valueUSD || 0;
+      balances.push(dt);
     }
   } catch (e) { /* ignore for scheduler */ }
 
@@ -1067,8 +1375,11 @@ async function fetchPortfolioForScheduler(address) {
 snapshotScheduler.init(fetchPortfolioForScheduler);
 
 const PORT = process.env.PORT || 4000;
+// Public API + portfolio profiles
+app.use(createPublicApiRoutes(fetchPortfolioForScheduler));
+
 app.listen(PORT, () => {
-  console.log(`Stellar DeBank API running on http://localhost:${PORT}`);
+  console.log(`Stellar Moonshot Bank API running on http://localhost:${PORT}`);
   console.log(`Dashboard: http://localhost:${PORT}`);
 
   // Start background snapshot scheduler

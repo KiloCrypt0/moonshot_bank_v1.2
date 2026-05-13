@@ -64,6 +64,28 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_token_snapshots_id
     ON token_snapshots(snapshot_id);
+
+  -- Discovery cache: which wallets are known to hold which Soroban contracts.
+  -- Once any non-zero balance is observed, the row persists so subsequent
+  -- discovery runs always re-probe that wallet/contract pair, even if the
+  -- contract leaves the active token-universe candidate set.
+  CREATE TABLE IF NOT EXISTS discovered_balances (
+    wallet_address TEXT NOT NULL,
+    contract_id TEXT NOT NULL,
+    balance_raw TEXT,         -- raw balance as string (Soroban i128 may exceed JS Number precision)
+    decimals INTEGER,
+    symbol TEXT,
+    last_checked_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_nonzero_at TEXT,
+    PRIMARY KEY (wallet_address, contract_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_discovered_balances_wallet
+    ON discovered_balances(wallet_address);
+
+  CREATE INDEX IF NOT EXISTS idx_discovered_balances_nonzero
+    ON discovered_balances(wallet_address, last_nonzero_at)
+    WHERE last_nonzero_at IS NOT NULL;
 `);
 
 // Migration: add tier column if upgrading from an older schema
@@ -159,6 +181,47 @@ const stmts = {
   deleteOldSnapshots: db.prepare(`
     DELETE FROM portfolio_snapshots
     WHERE address = ? AND snapshot_at < datetime('now', ?)
+  `),
+
+  // ── Discovery cache ─────────────────────────────────────────────────────────
+
+  upsertDiscoveredBalance: db.prepare(`
+    INSERT INTO discovered_balances
+      (wallet_address, contract_id, balance_raw, decimals, symbol, last_checked_at, last_nonzero_at)
+    VALUES
+      (@walletAddress, @contractId, @balanceRaw, @decimals, @symbol,
+       datetime('now'),
+       CASE WHEN @balanceRaw != '0' AND @balanceRaw IS NOT NULL THEN datetime('now') ELSE NULL END)
+    ON CONFLICT(wallet_address, contract_id) DO UPDATE SET
+      balance_raw = @balanceRaw,
+      decimals = COALESCE(@decimals, decimals),
+      symbol = COALESCE(@symbol, symbol),
+      last_checked_at = datetime('now'),
+      last_nonzero_at = CASE
+        WHEN @balanceRaw != '0' AND @balanceRaw IS NOT NULL THEN datetime('now')
+        ELSE last_nonzero_at
+      END
+  `),
+
+  getHistoricalContractsForWallet: db.prepare(`
+    SELECT contract_id, balance_raw, decimals, symbol, last_checked_at, last_nonzero_at
+    FROM discovered_balances
+    WHERE wallet_address = ? AND last_nonzero_at IS NOT NULL
+  `),
+
+  getDiscoveredBalance: db.prepare(`
+    SELECT balance_raw, decimals, symbol, last_checked_at, last_nonzero_at
+    FROM discovered_balances
+    WHERE wallet_address = ? AND contract_id = ?
+  `),
+
+  getDiscoveryStats: db.prepare(`
+    SELECT
+      COUNT(*) as total_entries,
+      COUNT(DISTINCT wallet_address) as wallets,
+      COUNT(DISTINCT contract_id) as contracts,
+      SUM(CASE WHEN last_nonzero_at IS NOT NULL THEN 1 ELSE 0 END) as nonzero_entries
+    FROM discovered_balances
   `),
 };
 
@@ -288,6 +351,32 @@ function getTokenHistory(address, network, assetCode, range = "30d") {
 }
 
 /**
+ * Get the snapshot closest to a given ISO timestamp.
+ * Returns the snapshot + its token breakdown.
+ */
+function getSnapshotAtDate(address, isoDate, network = "mainnet") {
+  // Find the single snapshot closest to the requested timestamp
+  const snap = db.prepare(`
+    SELECT *, ABS(strftime('%s', snapshot_at) - strftime('%s', ?)) AS dist
+    FROM portfolio_snapshots
+    WHERE address = ? AND network = ?
+    ORDER BY dist ASC
+    LIMIT 1
+  `).get(isoDate, address, network);
+
+  if (!snap) return null;
+
+  // Get the token breakdown for that snapshot
+  const tokens = db.prepare(`
+    SELECT asset_code, asset_issuer, contract_id, balance, value_usd, price_usd
+    FROM token_snapshots
+    WHERE snapshot_id = ?
+  `).all(snap.id);
+
+  return { ...snap, tokens };
+}
+
+/**
  * Get the latest snapshot for an address.
  */
 function getLatestSnapshot(address, network = "mainnet") {
@@ -397,10 +486,58 @@ module.exports = {
   getHistory,
   getTokenHistory,
   getLatestSnapshot,
+  getSnapshotAtDate,
   getSnapshotCount,
   cleanupOldSnapshots,
   downsample,
   downsampleAll,
   getStats,
+  // Discovery cache
+  upsertDiscoveredBalance,
+  getHistoricalContractsForWallet,
+  getDiscoveredBalance,
+  getDiscoveryStats,
   db, // Expose for advanced queries
 };
+
+// ── Discovery cache helpers ───────────────────────────────────────────────────
+
+/**
+ * Record (or update) a probe result for a wallet/contract pair.
+ * Stores zero results too so we can avoid re-probing during short windows;
+ * any non-zero result marks last_nonzero_at, making this pair "sticky" for
+ * all future discovery runs even if the contract leaves the active universe.
+ */
+function upsertDiscoveredBalance(walletAddress, contractId, { balanceRaw, decimals, symbol } = {}) {
+  stmts.upsertDiscoveredBalance.run({
+    walletAddress,
+    contractId,
+    balanceRaw: balanceRaw != null ? String(balanceRaw) : "0",
+    decimals: decimals != null ? Number(decimals) : null,
+    symbol: symbol || null,
+  });
+}
+
+/**
+ * Return contract IDs we've historically observed this wallet holding
+ * (with any non-zero balance), regardless of current universe membership.
+ * The probe-based discoverer will always include these in its candidate set.
+ */
+function getHistoricalContractsForWallet(walletAddress) {
+  return stmts.getHistoricalContractsForWallet.all(walletAddress);
+}
+
+/**
+ * Look up the cached balance row for a single wallet/contract pair.
+ * Returns null if we've never probed it.
+ */
+function getDiscoveredBalance(walletAddress, contractId) {
+  return stmts.getDiscoveredBalance.get(walletAddress, contractId) || null;
+}
+
+/**
+ * Aggregate stats about the discovery cache.
+ */
+function getDiscoveryStats() {
+  return stmts.getDiscoveryStats.get() || { total_entries: 0, wallets: 0, contracts: 0, nonzero_entries: 0 };
+}
