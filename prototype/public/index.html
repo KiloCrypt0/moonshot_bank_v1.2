@@ -3489,5 +3489,148 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
   <a href="/terms.html" style="color: var(--text-secondary); text-decoration: none; margin: 0 14px;">Terms</a>
   <a href="/privacy.html" style="color: var(--text-secondary); text-decoration: none; margin: 0 14px;">Privacy</a>
   <a href="/security.html" style="color: var(--text-secondary); text-decoration: none; margin: 0 14px;">Security</a>
-</footer></body>
+</footer> <!-- Portfolio Export — Holdings and/or Activity, to CSV or Google Sheets -->
+<div style="position: fixed; bottom: 24px; right: 24px; display: flex; flex-direction: column; gap: 8px; z-index: 1000; font-family: inherit; align-items: stretch; min-width: 220px;">
+  <select id="export-scope"
+    style="background: #1a2332; color: #e2e8f0; border: 1px solid #2a3a4e; border-radius: 999px; padding: 10px 18px; font-size: 13px; font-family: inherit; cursor: pointer; outline: none;">
+    <option value="both">Holdings + Activity</option>
+    <option value="holdings">Holdings only</option>
+    <option value="activity">Activity only</option>
+  </select>
+  <button onclick="exportPortfolio('csv')" id="csv-btn"
+    style="background: var(--accent, #6366f1); color: white; border: none; border-radius: 999px; padding: 12px 22px; font-size: 13px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; gap: 8px;"
+    onmouseover="this.style.background='var(--accent-light, #818cf8)'"
+    onmouseout="this.style.background='var(--accent, #6366f1)'">
+    <span style="font-size: 16px;">📥</span> Download CSV
+  </button>
+  <button onclick="exportPortfolio('sheets')" id="sheets-btn"
+    style="background: #0f9d58; color: white; border: none; border-radius: 999px; padding: 12px 22px; font-size: 13px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; gap: 8px;"
+    onmouseover="this.style.background='#0b8043'"
+    onmouseout="this.style.background='#0f9d58'">
+    <span style="font-size: 16px;">📊</span> Copy for Sheets
+  </button>
+</div>
+
+<script>
+async function exportPortfolio(mode) {
+  const btn = document.getElementById(mode === 'csv' ? 'csv-btn' : 'sheets-btn');
+  const scope = document.getElementById('export-scope').value;
+  const urlMatch = decodeURIComponent(window.location.href).match(/G[A-Z0-9]{55}/);
+  const inputAddr = Array.from(document.querySelectorAll('input')).map(i => i.value?.trim()).find(v => v && v.match(/^G[A-Z0-9]{55}$/));
+  const address = (urlMatch && urlMatch[0]) || inputAddr;
+
+  if (!address) { alert('Please look up a Stellar wallet first.'); return; }
+
+  const original = btn.innerHTML;
+  btn.innerHTML = '<span>⏳</span> Loading...';
+  btn.disabled = true;
+
+  try {
+    const allRows = [];
+    let subentryCount;
+
+    // Holdings
+    if (scope === 'holdings' || scope === 'both') {
+      const resp = await fetch('https://horizon.stellar.org/accounts/' + address);
+      if (!resp.ok) throw new Error('Horizon /accounts returned ' + resp.status);
+      const account = await resp.json();
+      subentryCount = account.subentry_count;
+
+      const XLM_PRICE = 0.1741;
+      const STABLES = { USDC: 1.00, EURC: 1.00, USDT: 1.00, DAI: 1.00 };
+
+      allRows.push(['=== HOLDINGS ===']);
+      allRows.push(['Asset', 'Type', 'Issuer', 'Balance', 'Available', 'Reserved', 'USD Price', 'USD Value', 'Trustline Limit', 'Authorized']);
+
+      let total = 0;
+      for (const b of account.balances) {
+        if (b.asset_type === 'native') {
+          const bal = parseFloat(b.balance);
+          const reserved = parseFloat(b.buying_liabilities || 0) + parseFloat(b.selling_liabilities || 0);
+          const value = bal * XLM_PRICE;
+          total += value;
+          allRows.push(['XLM', 'native', '', bal.toFixed(7), (bal - reserved).toFixed(7), reserved.toFixed(7), XLM_PRICE.toFixed(4), value.toFixed(2), '', '']);
+        } else if (b.asset_type === 'liquidity_pool_shares') {
+          allRows.push(['LP Share', 'liquidity_pool_shares', b.liquidity_pool_id || '', b.balance, '', '', '', '', '', '']);
+        } else {
+          const code = b.asset_code || '';
+          const bal = parseFloat(b.balance);
+          const price = STABLES[code] ?? null;
+          const value = price !== null ? bal * price : null;
+          if (value !== null) total += value;
+          allRows.push([code, b.asset_type, b.asset_issuer || '', bal.toFixed(7), '', '', price !== null ? price.toFixed(4) : '', value !== null ? value.toFixed(2) : '', b.limit || '', b.is_authorized !== false ? 'yes' : 'no']);
+        }
+      }
+      allRows.push(['TOTAL (USD, priced assets only)', '', '', '', '', '', '', total.toFixed(2), '', '']);
+      allRows.push([]);
+    }
+
+    // Activity
+    if (scope === 'activity' || scope === 'both') {
+      const resp = await fetch('https://horizon.stellar.org/accounts/' + address + '/payments?order=desc&limit=100');
+      if (!resp.ok) throw new Error('Horizon /payments returned ' + resp.status);
+      const data = await resp.json();
+      const payments = data._embedded.records;
+
+      allRows.push(['=== ACTIVITY (most recent ' + payments.length + ' payments) ===']);
+      allRows.push(['Date (UTC)', 'Type', 'Direction', 'Counterparty', 'Asset', 'Amount', 'Asset Issuer', 'Tx Hash']);
+
+      for (const op of payments) {
+        let direction, counterparty, asset, issuer = '', amount;
+        if (op.type === 'payment' || op.type === 'path_payment_strict_send' || op.type === 'path_payment_strict_receive') {
+          if (op.to === address && op.from === address) { direction = 'self'; counterparty = ''; }
+          else if (op.to === address) { direction = 'in'; counterparty = op.from; }
+          else { direction = 'out'; counterparty = op.to; }
+          asset = op.asset_code || (op.asset_type === 'native' ? 'XLM' : '');
+          issuer = op.asset_issuer || '';
+          amount = op.amount;
+        } else if (op.type === 'create_account') {
+          if (op.account === address) { direction = 'in'; counterparty = op.funder; }
+          else { direction = 'out'; counterparty = op.account; }
+          asset = 'XLM';
+          amount = op.starting_balance;
+        } else {
+          continue;
+        }
+        allRows.push([op.created_at, op.type, direction, counterparty, asset, amount, issuer, op.transaction_hash]);
+      }
+      allRows.push([]);
+    }
+
+    // Metadata
+    allRows.push(['=== METADATA ===']);
+    allRows.push(['Wallet', address]);
+    if (subentryCount !== undefined) allRows.push(['Subentry Count', String(subentryCount)]);
+    allRows.push(['Scope', scope === 'both' ? 'Holdings + Activity' : (scope === 'holdings' ? 'Holdings only' : 'Activity only')]);
+    allRows.push(['Exported (UTC)', new Date().toISOString()]);
+    allRows.push(['Source', 'Stellar Moonshot Bank (Horizon API)']);
+
+    if (mode === 'csv') {
+      const csv = allRows.map(row => row.map(cell => {
+        const s = String(cell ?? '');
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      }).join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'moonshot_' + scope + '_' + address.slice(0,8) + '_' + new Date().toISOString().split('T')[0] + '.csv';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+      btn.innerHTML = '<span>✓</span> Downloaded';
+    } else {
+      const tsv = allRows.map(row => row.map(cell => String(cell ?? '').replace(/\t/g, ' ').replace(/\n/g, ' ')).join('\t')).join('\n');
+      await navigator.clipboard.writeText(tsv);
+      btn.innerHTML = '<span>✓</span> Paste in Sheets';
+    }
+
+    setTimeout(() => { btn.innerHTML = original; btn.disabled = false; }, 2500);
+  } catch (e) {
+    alert('Export failed: ' + e.message);
+    btn.innerHTML = original;
+    btn.disabled = false;
+  }
+}
+</script> </body>
 </html>
