@@ -92,26 +92,32 @@ function _seedFromPriceMap() {
       _add({ contractId, source: "price-map" });
     }
   }
-  // Fallback: if price-map doesn't expose enumeration, we re-seed from the
-  // same CoinGecko-derived contractIds inline. This keeps token-universe
-  // functional even if price-map's API stays minimal.
+  // Static seed of known Soroban contracts with their decimals and symbols.
+  // Critical: Soroban RPC metadata calls can fail (rate-limit, transient errors).
+  // When they do, contract-discovery falls back to defaults — and the wrong
+  // default for an 8-decimals token (like SolvBTC) produces a 10x balance
+  // misreport. Encoding decimals here guarantees correct balance formatting
+  // even when metadata fetch fails.
+  //
+  // Decimals values: Bitcoin-derived tokens (SolvBTC, SolvBTC.BBN) use 8;
+  // Stellar-native and stablecoin SACs use 7 (the Stellar default).
   const STATIC_SEED = [
-    "CB44W727WSLHPXJ47A6DHF5D34RKWSOZAMEDXO3CF5TEEEQ2ZX4V3VRI", // EURAU
-    "CBGV2QFQBBGEQRUKUMCPO3SZOHDDYO6SCP5CH6TW7EALKVHCXTMWDDOF", // EUTBL
-    "CCCRWH6Q3FNP3I2I57BDLM5AFAT7O6OF6GKQOC6SSJNDAVRZ57SPHGU2", // PYUSD
-    "CDGSC6BA4TCAOVSFQCUEHDMOIIHYYVNYBT6YEARS4MX3ITAHUINVGQHX", // SAFO
-    "CANKBYNNAYKEZXLB655F2UPNTAZFK5HILZUXL7ZTFR3NF6LKDSVY7KFH", // EURCV
-    "CBIJBDNZNF4X35BJ4FFZWCDBSCKOP5NB4PLG4SNENRMLAPYG4P5FM6VN", // SOLVBTC
-    "CAUP7NFABXE5TJRL3FKTPMWRLC7IAXYDCTHQRFSCLR5TMGKHOOQO772J", // XSOLVBTC
-    "CAJD2IBSP7VO2VYJQUYJSOGPJINTUYV7MQITINXVPTIH3CCLCUENNMW4", // CHFSAFO
-    "CBOOCGZSVRSZFRE4U2NWR2B4RXYVJWRCBTGOUD2JPI2TDJPWMTJX7FZP", // EURSAFO
-    "CAGYRRKPFSWKM6SJOE4QAAVYMOSHMDS5WOQ4T5A2E6XNCU7LZZKUNQKP", // GBPSAFO
-    "CDT3KU6TQZNOHKNOHNAFFDQZDURVC3MSTL4ML7TUTZGNOPBZCLABP4FR", // UKTBL
-    "CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA", // XLM SAC
-    "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75", // USDC SAC
-    "CAC743NYRBMS76L2DCPAXZTOEF6EJPKPVEC5OX2SXY7HOWNXISSLUE2C", // USDM1
+    { contractId: "CB44W727WSLHPXJ47A6DHF5D34RKWSOZAMEDXO3CF5TEEEQ2ZX4V3VRI", symbol: "EURAU",    decimals: 7 },
+    { contractId: "CBGV2QFQBBGEQRUKUMCPO3SZOHDDYO6SCP5CH6TW7EALKVHCXTMWDDOF", symbol: "EUTBL",    decimals: 7 },
+    { contractId: "CCCRWH6Q3FNP3I2I57BDLM5AFAT7O6OF6GKQOC6SSJNDAVRZ57SPHGU2", symbol: "PYUSD",    decimals: 7 },
+    { contractId: "CDGSC6BA4TCAOVSFQCUEHDMOIIHYYVNYBT6YEARS4MX3ITAHUINVGQHX", symbol: "SAFO",     decimals: 7 },
+    { contractId: "CANKBYNNAYKEZXLB655F2UPNTAZFK5HILZUXL7ZTFR3NF6LKDSVY7KFH", symbol: "EURCV",    decimals: 7 },
+    { contractId: "CBIJBDNZNF4X35BJ4FFZWCDBSCKOP5NB4PLG4SNENRMLAPYG4P5FM6VN", symbol: "SOLVBTC",  decimals: 8 },
+    { contractId: "CAUP7NFABXE5TJRL3FKTPMWRLC7IAXYDCTHQRFSCLR5TMGKHOOQO772J", symbol: "XSOLVBTC", decimals: 8 },
+    { contractId: "CAJD2IBSP7VO2VYJQUYJSOGPJINTUYV7MQITINXVPTIH3CCLCUENNMW4", symbol: "CHFSAFO",  decimals: 7 },
+    { contractId: "CBOOCGZSVRSZFRE4U2NWR2B4RXYVJWRCBTGOUD2JPI2TDJPWMTJX7FZP", symbol: "EURSAFO",  decimals: 7 },
+    { contractId: "CAGYRRKPFSWKM6SJOE4QAAVYMOSHMDS5WOQ4T5A2E6XNCU7LZZKUNQKP", symbol: "GBPSAFO",  decimals: 7 },
+    { contractId: "CDT3KU6TQZNOHKNOHNAFFDQZDURVC3MSTL4ML7TUTZGNOPBZCLABP4FR", symbol: "UKTBL",    decimals: 7 },
+    { contractId: "CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA", symbol: "XLM",      decimals: 7 },
+    { contractId: "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75", symbol: "USDC",     decimals: 7 },
+    { contractId: "CAC743NYRBMS76L2DCPAXZTOEF6EJPKPVEC5OX2SXY7HOWNXISSLUE2C", symbol: "USDM1",    decimals: 7 },
   ];
-  for (const c of STATIC_SEED) _add({ contractId: c, source: "price-map-fallback" });
+  for (const e of STATIC_SEED) _add({ ...e, source: "static-seed" });
 }
 
 // ── Source 2: Soroswap official token list ───────────────────────────────────
