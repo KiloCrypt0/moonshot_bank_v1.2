@@ -562,6 +562,52 @@ app.get("/api/v1/account/:address/token-history/:assetCode", (req, res) => {
   }
 });
 
+// Get snapshot closest to a specific date/time
+app.get("/api/v1/account/:address/snapshot-at", (req, res) => {
+  try {
+    const { address } = req.params;
+    const { date } = req.query; // ISO string, e.g. "2026-05-10T14:00:00"
+
+    if (!date) {
+      return res.status(400).json({ error: "Missing ?date= parameter (ISO timestamp)" });
+    }
+
+    const snapshot = historyDb.getSnapshotAtDate(address, date, "mainnet");
+
+    if (!snapshot) {
+      return res.json({
+        address,
+        requestedDate: date,
+        found: false,
+        message: "No snapshots found for this wallet. Snapshots are recorded after you add the wallet.",
+      });
+    }
+
+    res.json({
+      address,
+      requestedDate: date,
+      found: true,
+      snapshotDate: snapshot.snapshot_at,
+      totalValueUSD: snapshot.total_value_usd,
+      xlmBalance: snapshot.xlm_balance,
+      xlmPriceUSD: snapshot.xlm_price_usd,
+      tokenCount: snapshot.token_count,
+      defiPositionCount: snapshot.defi_position_count,
+      tokens: snapshot.tokens.map((t) => ({
+        asset: t.asset_code,
+        issuer: t.asset_issuer,
+        contractId: t.contract_id,
+        balance: t.balance,
+        valueUSD: t.value_usd,
+        priceUSD: t.price_usd,
+      })),
+    });
+  } catch (e) {
+    console.error("Snapshot-at error:", e.message);
+    res.status(500).json({ error: "Failed to fetch snapshot" });
+  }
+});
+
 // Enable/disable tracking for a wallet
 app.post("/api/v1/account/:address/track", (req, res) => {
   try {
