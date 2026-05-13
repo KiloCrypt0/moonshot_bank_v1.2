@@ -1261,6 +1261,98 @@
       color: var(--text-muted);
     }
 
+    /* ── Space Background ──────────────────────────────────── */
+    @keyframes twinkle { 0%,100%{opacity:.6} 50%{opacity:.1} }
+    .star { position:absolute; border-radius:50%; background:white; animation:twinkle var(--d,2s) infinite; }
+
+    /* ── Whale Leaderboard ─────────────────────────────────── */
+    .whale-section {
+      margin-top: 48px;
+      max-width: 600px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .whale-section-title {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 16px;
+      color: var(--text-primary);
+    }
+
+    .whale-table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .whale-table th {
+      padding: 10px 16px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .whale-table td {
+      padding: 12px 16px;
+      font-size: 14px;
+      color: var(--text-secondary);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .whale-table tr:last-child td { border-bottom: none; }
+    .whale-table tr { cursor: pointer; }
+    .whale-table tr:hover td { background: var(--bg-hover); }
+    .whale-address a { color: var(--accent-light); text-decoration: none; }
+    .whale-address a:hover { text-decoration: underline; }
+
+    .whale-rank {
+      font-weight: 700;
+      color: var(--accent-light);
+      width: 40px;
+    }
+
+    .whale-address {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 13px;
+    }
+
+    .whale-balance {
+      text-align: right;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    /* ── Featured NFT ──────────────────────────────────────── */
+    .featured-nft-section {
+      margin-top: 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .featured-nft-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text-secondary);
+    }
+
+    #featured-nft {
+      width: 120px;
+      height: 120px;
+      border-radius: 12px;
+      object-fit: cover;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+    }
+
     /* ── Responsive ────────────────────────────────────────── */
     @media (max-width: 768px) {
       .header { padding: 12px 16px; flex-wrap: wrap; gap: 12px; }
@@ -1276,16 +1368,62 @@
 </head>
 <body>
 
+
+  <div class="space-bg" style="position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0;overflow:hidden;">
+    <span class="star" style="--d:2.1s;width:2px;height:2px;top:5%;left:8%;"></span>
+    <span class="star" style="--d:3.4s;width:3px;height:3px;top:9%;left:22%;"></span>
+    <span class="star" style="--d:1.8s;width:2px;height:2px;top:3%;left:37%;"></span>
+    <span class="star" style="--d:2.7s;width:2px;height:2px;top:12%;left:51%;"></span>
+    <span class="star" style="--d:3.1s;width:3px;height:3px;top:7%;left:64%;"></span>
+    <span class="star" style="--d:1.5s;width:2px;height:2px;top:4%;left:78%;"></span>
+    <span class="star" style="--d:2.9s;width:2px;height:2px;top:11%;left:91%;"></span>
+    <span class="star" style="--d:3.6s;width:3px;height:3px;top:18%;left:5%;"></span>
+    <span class="star" style="--d:2.2s;width:2px;height:2px;top:22%;left:16%;"></span>
+    <span class="star" style="--d:1.7s;width:2px;height:2px;top:27%;left:29%;"></span>
+    <span class="star" style="--d:3.0s;width:3px;height:3px;top:20%;left:43%;"></span>
+    <span class="star" style="--d:2.5s;width:2px;height:2px;top:25%;left:57%;"></span>
+    <span class="star" style="--d:1.9s;width:2px;height:2px;top:19%;left:72%;"></span>
+    <span class="star" style="--d:3.3s;width:3px;height:3px;top:24%;left:85%;"></span>
+    <span class="star" style="--d:2.0s;width:2px;height:2px;top:32%;left:3%;"></span>
+    <span class="star" style="--d:2.8s;width:2px;height:2px;top:35%;left:14%;"></span>
+    <span class="star" style="--d:1.6s;width:3px;height:3px;top:38%;left:26%;"></span>
+    <span class="star" style="--d:3.2s;width:2px;height:2px;top:31%;left:39%;"></span>
+    <span class="star" style="--d:2.4s;width:2px;height:2px;top:36%;left:53%;"></span>
+    <span class="star" style="--d:1.3s;width:2px;height:2px;top:33%;left:67%;"></span>
+    <span class="star" style="--d:2.6s;width:3px;height:3px;top:40%;left:80%;"></span>
+    <span class="star" style="--d:3.5s;width:2px;height:2px;top:37%;left:94%;"></span>
+    <span class="star" style="--d:2.3s;width:2px;height:2px;top:48%;left:7%;"></span>
+    <span class="star" style="--d:1.4s;width:3px;height:3px;top:52%;left:19%;"></span>
+    <span class="star" style="--d:3.0s;width:2px;height:2px;top:45%;left:33%;"></span>
+    <span class="star" style="--d:2.1s;width:2px;height:2px;top:55%;left:46%;"></span>
+    <span class="star" style="--d:1.8s;width:3px;height:3px;top:49%;left:60%;"></span>
+    <span class="star" style="--d:2.9s;width:2px;height:2px;top:53%;left:74%;"></span>
+    <span class="star" style="--d:3.4s;width:2px;height:2px;top:47%;left:88%;"></span>
+    <span class="star" style="--d:1.7s;width:2px;height:2px;top:62%;left:11%;"></span>
+    <span class="star" style="--d:2.5s;width:3px;height:3px;top:65%;left:25%;"></span>
+    <span class="star" style="--d:3.1s;width:2px;height:2px;top:70%;left:40%;"></span>
+    <span class="star" style="--d:2.0s;width:2px;height:2px;top:68%;left:55%;"></span>
+    <span class="star" style="--d:1.5s;width:3px;height:3px;top:72%;left:69%;"></span>
+    <span class="star" style="--d:2.7s;width:2px;height:2px;top:67%;left:83%;"></span>
+    <span class="star" style="--d:3.3s;width:2px;height:2px;top:78%;left:6%;"></span>
+    <span class="star" style="--d:1.9s;width:3px;height:3px;top:81%;left:21%;"></span>
+    <span class="star" style="--d:2.6s;width:2px;height:2px;top:85%;left:36%;"></span>
+    <span class="star" style="--d:3.2s;width:2px;height:2px;top:80%;left:50%;"></span>
+    <span class="star" style="--d:2.2s;width:3px;height:3px;top:88%;left:63%;"></span>
+    <span class="star" style="--d:1.6s;width:2px;height:2px;top:83%;left:77%;"></span>
+    <span class="star" style="--d:3.0s;width:2px;height:2px;top:90%;left:92%;"></span>
+  </div>
+
   <div class="header">
     <div class="logo" onclick="goHome()" style="cursor:pointer;" title="Back to home">
-      <div class="logo-icon">S</div>
+      <img src="/stellar-mark.png" alt="Stellar" style="width:30px;height:30px;object-fit:contain;filter:invert(1);flex-shrink:0;" />
       Stellar Moonshot Bank
     </div>
     <div class="search-container">
       <div class="search-box">
         <input type="text" id="addressInput" placeholder="Enter Stellar address (G...)" spellcheck="false" />
         <button class="btn" id="searchBtn" onclick="loadPortfolio()">Look Up</button>
-        <button class="btn btn-secondary" id="addToPortfolioBtn" onclick="addCurrentToPortfolio()" title="Add to portfolio" style="padding: 12px 14px;">+</button>
+        <button class="btn btn-secondary" id="addToPortfolioBtn" onclick="addCurrentToPortfolio()" title="Add this address to your portfolio" style="padding: 12px 14px; font-size: 13px;">+ Save</button>
       </div>
     </div>
     <div class="header-right">
@@ -1306,7 +1444,18 @@
 
   <div class="main" id="app">
     <div class="welcome" id="welcomeState">
-      <h1>Stellar Moonshot Bank</h1>
+      <h1 style="display:flex;align-items:center;gap:16px;justify-content:center;">
+        <img src="/stellar-mark.png" alt="Stellar" style="width:54px;height:54px;object-fit:contain;filter:invert(1);flex-shrink:0;" />
+        Stellar Moonshot Bank
+      </h1>
+
+      <div style="margin: 16px auto 24px; display:flex; justify-content:center;">
+        <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:16px; padding:12px; display:inline-flex; flex-direction:column; align-items:center; gap:8px; box-shadow:0 8px 32px rgba(0,0,0,0.4);">
+          <img src="https://bronze-adjacent-barnacle-907.mypinata.cloud/ipfs/bafybeigdv2ccs3bighhgvqj65sgi6bz6qruz4r5bqxpwovem5m5t7xcifi/M25_63.jpg" alt="Featured NFT" style="width:160px;height:160px;border-radius:10px;object-fit:cover;display:block;" />
+          <span style="font-size:11px;color:var(--text-muted);letter-spacing:0.5px;">✦ Featured NFT</span>
+        </div>
+      </div>
+
       <p>Full portfolio visibility — track multiple wallets, Soroban DeFi, LP positions, and portfolio value over time.</p>
 
       <div style="display: flex; gap: 16px; justify-content: center; margin-bottom: 32px; flex-wrap: wrap;">
@@ -1323,18 +1472,42 @@
         </button>
       </div>
 
-      <div class="or-divider" style="margin-bottom: 20px; font-size: 14px;">or paste an address above to look up any wallet</div>
 
-      <div style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">Try an example:</div>
-      <div class="example-addresses">
-        <button class="example-btn" onclick="loadExample('GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN')">GA5ZS...KZVN (USDC Issuer)</button>
-        <button class="example-btn" onclick="loadExample('GDZZZXSQKEJCR5CJQODVJAF3J72WV4DHWQCW7M4JGTHN4JPA7AUGVILM')">GDZZZ...VILM (Multi-asset)</button>
-        <button class="example-btn" onclick="loadExample('GDZZZV63F63EL63XSKXE6V535JYUW2WFO6VKLYH73LCOUJCUCDRFPNIW')">GDZZZ...PNIW (BLND + USDC)</button>
+      <div class="whale-section">
+        <div class="whale-section-title">🐋🪐 Top XLM Whales</div>
+        <table class="whale-table" id="whaleTable">
+          <thead>
+            <tr>
+              <th class="whale-rank">#</th>
+              <th>Address</th>
+              <th style="text-align:right">XLM Balance</th>
+              <th style="text-align:right">Assets</th>
+            </tr>
+          </thead>
+          <tbody id="whaleTableBody">
+            <tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:20px;">Loading whales...</td></tr>
+          </tbody>
+        </table>
       </div>
+
+      <div style="margin-top:32px;text-align:center;">
+        <img src="/moonshot-mascot.png" alt="Moonshot mascot" style="width:480px;max-width:90%;border-radius:20px;opacity:0.75;" />
+      </div>
+
     </div>
   </div>
 
   <script>
+    // ── Go Home ───────────────────────────────────────────────
+    function goHome() {
+      location.reload();
+    }
+
+    function lookUpWhale(address) {
+      document.getElementById('addressInput').value = address;
+      loadPortfolio();
+    }
+
     // ── State ──────────────────────────────────────────────────
     let currentData = null;
     let currentTab = "tokens";
@@ -1356,6 +1529,7 @@
     let timeTravelSnapshot = null;  // Snapshot data when viewing historical
 
     const API_BASE = window.location.origin;
+    const WELCOME_HTML = document.getElementById("app").innerHTML; // Save initial welcome screen
 
     const WALLET_COLORS = [
       "linear-gradient(135deg, #6366f1, #8b5cf6)",
@@ -1479,6 +1653,37 @@
       }
     }
 
+    // ── Load Whale Leaderboard ────────────────────────────────
+    async function loadWhales() {
+      const tbody = document.getElementById("whaleTableBody");
+      if (!tbody) return;
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/whales`);
+        if (!res.ok) throw new Error("Failed to fetch");
+        const data = await res.json();
+        const whales = data.whales || [];
+        if (whales.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; color:var(--text-muted); padding:20px;">No data available</td></tr>';
+          return;
+        }
+        tbody.innerHTML = whales.map((w, i) => {
+          const shortAddr = w.address ? w.address.slice(0, 6) + "..." + w.address.slice(-4) : "—";
+          const balM = w.balance ? (w.balance >= 1_000_000_000
+            ? (w.balance / 1_000_000_000).toLocaleString("en-US", { maximumFractionDigits: 1 }) + "B XLM"
+            : (w.balance / 1_000_000).toLocaleString("en-US", { maximumFractionDigits: 0 }) + "M XLM") : "—";
+          const assets = w.assetCount != null ? w.assetCount : "—";
+          return `<tr onclick="lookUpWhale('${w.address}')">
+            <td class="whale-rank">#${i + 1}</td>
+            <td class="whale-address"><a href="#" onclick="event.preventDefault()">${shortAddr}</a></td>
+            <td class="whale-balance">${balM}</td>
+            <td class="whale-balance">${assets}</td>
+          </tr>`;
+        }).join("");
+      } catch (e) {
+        if (tbody) tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--red); padding:20px;">Failed to load whale data</td></tr>';
+      }
+    }
+
     // Auto-detect Freighter and auto-load portfolio on page load
     window.addEventListener("load", () => {
       setTimeout(async () => {
@@ -1487,6 +1692,8 @@
           console.log("Freighter wallet detected");
         }
 
+        // Load whale leaderboard on welcome page
+        loadWhales();
       }, 500);
     });
 
@@ -1869,7 +2076,12 @@
     async function addCurrentToPortfolio() {
       const input = document.getElementById("addressInput");
       const address = input.value.trim();
-      if (!address) return;
+      if (!address) {
+        input.focus();
+        input.setAttribute("placeholder", "Enter a Stellar address first, then click +");
+        setTimeout(() => input.setAttribute("placeholder", "Enter Stellar address (G...)"), 3000);
+        return;
+      }
       const label = prompt("Label for this wallet (optional):", "");
       if (await addWalletToPortfolio(address, label)) {
         alert("Wallet added to portfolio!");
@@ -1890,10 +2102,7 @@
       currentTab = "tokens";
       const input = document.getElementById("addressInput");
       if (input) input.value = "";
-      const app = document.getElementById("app");
-      const welcome = document.getElementById("welcomeState");
-      if (app) app.innerHTML = "";
-      if (welcome) welcome.style.display = "block";
+      document.getElementById("app").innerHTML = WELCOME_HTML;
     }
 
     async function enterPortfolioMode() {
