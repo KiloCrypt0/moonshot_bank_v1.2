@@ -1,31 +1,24 @@
 /**
- * Contract Discovery
+ * Soroban Token Auto-Discovery
  *
- * Auto-discovers Soroban SEP-41 token holdings for any address WITHOUT
- * requiring pre-registration in the static registry.
+ * Discovers SEP-41 Soroban tokens a wallet has interacted with by scanning
+ * its operation history for invoke_host_function operations.
  *
- * Algorithm:
- *   1. Walk the address's invoke_host_function operation history on Horizon
- *   2. Extract the contract ID from each call's first parameter
- *   3. For each unique contract, probe SEP-41 metadata (name/symbol/decimals).
- *      A contract that responds to all three is a token. Anything else
- *      (AMMs, governance, custom protocols) is skipped.
- *   4. Query balance(address) on each token contract. Drop zero balances.
- *   5. Return entries shaped identically to those produced by
- *      token-resolver.resolveSorobanTokens(), so the existing
- *      /api/v1/account/:address response and the frontend renderer
- *      (which already handles type === "soroban_token") need no changes.
+ * Strategy:
+ *   1. Pull recent operations from Horizon
+ *   2. Filter to invoke_host_function ops (Soroban contract calls)
+ *   3. For each unique contract called, check if it's an SEP-41 token
+ *      (has `balance`, `symbol`, `decimals` view functions)
+ *   4. Query the wallet's balance on each
+ *   5. Return non-zero balances
  *
- * Known limitations:
- *   - Tokens this wallet RECEIVED via a transfer signed by someone else
- *     will not appear in /accounts/:id/operations. To catch those, a
- *     follow-up pass using Soroban RPC's getEvents (filtered by topic =
- *     this address) would be required. Out of scope for v1.
- *   - The operation history window is bounded; very old interactions
- *     beyond MAX_OPS_TO_SCAN won't be discovered.
- *   - Discovery results are cached per address for DISCOVERY_TTL_MS.
- *     Refreshes within the TTL window return cached data.
+ * This is best-effort — it depends on the user having actually interacted
+ * with the token contract (e.g. transferred, claimed, swapped). Pure
+ * passive holdings (received but never touched) won't be discovered via
+ * operation history alone; a future enhancement could scan Soroban events
+ * (`SAC` mint/transfer events) for completeness.
  */
+
 const StellarSdk = require("@stellar/stellar-sdk");
 const { Address, scValToNative, xdr } = StellarSdk;
 const {
@@ -34,137 +27,104 @@ const {
   formatTokenAmount,
 } = require("./soroban-rpc");
 const { SOROBAN_TOKEN_REGISTRY } = require("./token-resolver");
-
-// ── Tunables ─────────────────────────────────────────────────────────────────
+const { enrichSorobanTokenWithPrice } = require("./pricing-engine");
 
 const HORIZON_URL = process.env.HORIZON_URL || "https://horizon.stellar.org";
-const MAX_OPS_TO_SCAN = parseInt(process.env.DISCOVERY_MAX_OPS || "1000", 10);
-const HORIZON_PAGE_SIZE = 200; // Horizon's max
-const DISCOVERY_TTL_MS = parseInt(process.env.DISCOVERY_TTL_MS || "300000", 10); // 5 min
-const PER_CONTRACT_TIMEOUT_MS = 10_000;
-const MAX_CONCURRENT_PROBES = 5;
 
-// ── Cache ────────────────────────────────────────────────────────────────────
+// Max operations to scan per wallet. Stellar accounts can have thousands of
+// operations; we cap at a reasonable recent window to keep latency bounded.
+const MAX_OPS_TO_SCAN = parseInt(process.env.DISCOVERY_MAX_OPS || "200", 10);
 
-const discoveryCache = new Map(); // address -> { ts, tokens }
+// Cap on distinct contracts to probe per wallet (defense in depth — a wallet
+// that interacted with hundreds of contracts shouldn't fan out into hundreds
+// of metadata queries).
+const MAX_CONTRACTS_TO_PROBE = parseInt(
+  process.env.DISCOVERY_MAX_CONTRACTS || "30",
+  10
+);
 
-function getCached(address) {
-  const hit = discoveryCache.get(address);
-  if (!hit) return null;
-  if (Date.now() - hit.ts > DISCOVERY_TTL_MS) {
-    discoveryCache.delete(address);
-    return null;
-  }
-  return hit.tokens;
-}
-
-function setCached(address, tokens) {
-  discoveryCache.set(address, { ts: Date.now(), tokens });
-}
-
-// ── Step 1: paginate operations and collect contract IDs ─────────────────────
-
-async function fetchInvokeHostFunctionOps(address) {
-  const seen = new Set();
-  let cursor = null;
-  let fetched = 0;
-
-  while (fetched < MAX_OPS_TO_SCAN) {
-    const url = new URL(`${HORIZON_URL}/accounts/${address}/operations`);
-    url.searchParams.set("order", "desc");
-    url.searchParams.set("limit", String(HORIZON_PAGE_SIZE));
-    if (cursor) url.searchParams.set("cursor", cursor);
-
-    let res;
-    try {
-      res = await fetch(url.toString(), {
-        headers: { Accept: "application/hal+json" },
-      });
-    } catch (e) {
-      console.error("Horizon ops fetch error:", e.message);
-      break;
-    }
-    if (!res.ok) {
-      if (res.status === 404) break; // account not found
-      console.error(`Horizon ops returned ${res.status}`);
-      break;
-    }
-    const body = await res.json();
-    const records = body?._embedded?.records || [];
-    if (records.length === 0) break;
-
-    for (const op of records) {
-      fetched++;
-      if (op.type !== "invoke_host_function") continue;
-      const contractId = extractContractIdFromOp(op);
-      if (contractId) seen.add(contractId);
-    }
-
-    if (records.length < HORIZON_PAGE_SIZE) break; // end of history
-    cursor = records[records.length - 1].paging_token;
-  }
-
-  return Array.from(seen);
+// Contracts already known via the static registry — skip these to avoid
+// double-resolution (token-resolver.js handles them).
+function _isAlreadyKnown(contractId) {
+  return SOROBAN_TOKEN_REGISTRY.some(
+    (t) => t.contractId === contractId
+  );
 }
 
 /**
- * Every invoke_host_function op's first ScVal parameter is the contract being
- * called. Decode it from base64 XDR back to a C-strkey.
+ * Pull recent invoke_host_function operations for a wallet and extract the
+ * distinct contract addresses called.
+ *
+ * @param {string} accountId G-strkey of the wallet
+ * @returns {Promise<string[]>} array of unique contract IDs (C-strkeys)
  */
-function extractContractIdFromOp(op) {
-  const params = op.parameters;
-  if (!params || params.length === 0) return null;
+async function _findCalledContracts(accountId) {
+  const url = `${HORIZON_URL}/accounts/${accountId}/operations?order=desc&limit=200&include_failed=false`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    console.error(`[contract-discovery] Horizon ${res.status} for ${accountId}`);
+    return [];
+  }
+  const data = await res.json();
+  const ops = (data._embedded && data._embedded.records) || [];
+
+  const seen = new Set();
+  for (const op of ops.slice(0, MAX_OPS_TO_SCAN)) {
+    if (op.type !== "invoke_host_function") continue;
+    // The host_function payload encodes which contract was invoked.
+    // Horizon decodes this into op.function = "HostFunctionTypeHostFunctionTypeInvokeContract"
+    // and op.parameters[0] = the contract address.
+    if (
+      op.parameters &&
+      Array.isArray(op.parameters) &&
+      op.parameters.length > 0
+    ) {
+      const firstParam = op.parameters[0];
+      // The contract address is in different fields depending on Horizon version
+      const candidate =
+        firstParam.value || firstParam.address || firstParam.contractId;
+      if (
+        candidate &&
+        typeof candidate === "string" &&
+        candidate.startsWith("C") &&
+        candidate.length >= 56
+      ) {
+        seen.add(candidate);
+      }
+    }
+  }
+  return Array.from(seen).slice(0, MAX_CONTRACTS_TO_PROBE);
+}
+
+/**
+ * Resolve a single discovered contract into a SEP-41 token result, or null
+ * if it isn't a token / wallet has no balance / probe failed.
+ */
+async function resolveDiscoveredToken(contractId, accountId) {
+  // Try to get metadata first. If the contract doesn't expose `symbol`/`decimals`,
+  // it's not a SEP-41 token and we skip it.
+  let meta;
   try {
-    const scval = xdr.ScVal.fromXDR(params[0].value, "base64");
-    if (scval.switch().name !== "scvAddress") return null;
-    const addr = Address.fromScAddress(scval.address());
-    const str = addr.toString();
-    return str.startsWith("C") ? str : null;
+    meta = await getTokenMetadata(contractId);
   } catch (e) {
     return null;
   }
-}
+  if (!meta || !meta.symbol || meta.decimals == null) return null;
 
-// ── Step 2: probe each contract for SEP-41 token metadata ───────────────────
-
-/**
- * A contract is treated as a token if name/symbol/decimals all resolve to
- * non-default values. getTokenMetadata returns "Unknown"/"???"/7 on failure,
- * so we reject those sentinels.
- */
-async function probeIsToken(contractId) {
-  const meta = await withTimeout(
-    getTokenMetadata(contractId),
-    PER_CONTRACT_TIMEOUT_MS,
-    null,
-  );
-  if (!meta) return null;
-  // Reject the failure sentinels from getTokenMetadata
-  if (meta.symbol === "???" || meta.name === "Unknown") return null;
-  // Sanity: symbol should be a short string, decimals 0..36
-  if (typeof meta.symbol !== "string" || meta.symbol.length > 32) return null;
-  if (!Number.isInteger(meta.decimals) || meta.decimals < 0 || meta.decimals > 36) return null;
-  return meta;
-}
-
-// ── Step 3+4: resolve balances and shape results ────────────────────────────
-
-async function resolveDiscoveredToken(contractId, userAddress) {
-  const meta = await probeIsToken(contractId);
-  if (!meta) return null;
-
-  const rawBalance = await withTimeout(
-    getTokenBalance(contractId, userAddress),
-    PER_CONTRACT_TIMEOUT_MS,
-    "0",
-  );
-  if (BigInt(rawBalance) === 0n) return null;
+  // Then query balance.
+  let rawBalance;
+  try {
+    rawBalance = await getTokenBalance(contractId, accountId);
+  } catch (e) {
+    return null;
+  }
+  if (!rawBalance || rawBalance === 0n) return null;
 
   const balance = formatTokenAmount(rawBalance, meta.decimals);
 
   // Match the exact shape resolveSorobanTokens() returns so the existing
   // frontend handles this without any change.
-  return {
+  const token = {
     type: "soroban_token",
     asset: {
       code: meta.symbol,
@@ -177,89 +137,63 @@ async function resolveDiscoveredToken(contractId, userAddress) {
     balance,
     rawBalance,
     decimals: meta.decimals,
-    valueUSD: 0, // No automatic pricing for discovered tokens; matches resolveCustomToken
+    valueUSD: 0,
     price: null,
     source: "soroban_discovery",
   };
-}
 
-// ── Concurrency helper ──────────────────────────────────────────────────────
-
-async function mapWithConcurrency(items, limit, fn) {
-  const results = new Array(items.length);
-  let i = 0;
-  async function worker() {
-    while (i < items.length) {
-      const idx = i++;
-      try {
-        results[idx] = await fn(items[idx], idx);
-      } catch (e) {
-        results[idx] = null;
-      }
-    }
+  // Enrich with price from the pricing engine (CoinGecko → Aggregator → unpriced).
+  // Failures here leave the token visible but unpriced — never block.
+  try {
+    await enrichSorobanTokenWithPrice(token);
+  } catch (e) {
+    // swallow — token stays unpriced
   }
-  const workers = Array.from({ length: Math.min(limit, items.length) }, worker);
-  await Promise.all(workers);
-  return results;
+  return token;
 }
-
-function withTimeout(promise, ms, fallback) {
-  return new Promise((resolve) => {
-    const t = setTimeout(() => resolve(fallback), ms);
-    promise.then(
-      (v) => { clearTimeout(t); resolve(v); },
-      ()  => { clearTimeout(t); resolve(fallback); },
-    );
-  });
-}
-
-// ── Public API ───────────────────────────────────────────────────────────────
 
 /**
- * Auto-discover SEP-41 token holdings for an address.
- * Returns an array of soroban_token entries (same shape as resolveSorobanTokens).
- * Excludes contracts already in the static registry to avoid double-counting.
+ * Main entry point. Discover all SEP-41 Soroban tokens a wallet has any
+ * non-zero balance in.
+ *
+ * @param {string} accountId G-strkey of the wallet
+ * @returns {Promise<object[]>} array of token results
  */
-async function discoverSorobanTokens(address, { force = false } = {}) {
-  if (!force) {
-    const cached = getCached(address);
-    if (cached) return cached;
-  }
-
-  // Step 1: discover contracts from op history
-  const allContracts = await fetchInvokeHostFunctionOps(address);
-
-  // Step 1b: filter out anything already covered by the static registry
-  const registeredIds = new Set(
-    SOROBAN_TOKEN_REGISTRY.filter((t) => t.enabled).map((t) => t.contractId),
-  );
-  const candidates = allContracts.filter((c) => !registeredIds.has(c));
-
-  if (candidates.length === 0) {
-    setCached(address, []);
+async function discoverSorobanTokens(accountId) {
+  if (!accountId || typeof accountId !== "string" || !accountId.startsWith("G")) {
     return [];
   }
 
-  // Steps 2-4: probe and resolve each candidate concurrently
-  const resolved = await mapWithConcurrency(
-    candidates,
-    MAX_CONCURRENT_PROBES,
-    (contractId) => resolveDiscoveredToken(contractId, address),
+  let contracts;
+  try {
+    contracts = await _findCalledContracts(accountId);
+  } catch (e) {
+    console.error(`[contract-discovery] failed for ${accountId}:`, e.message);
+    return [];
+  }
+
+  // Filter out already-known tokens from the static registry
+  contracts = contracts.filter((c) => !_isAlreadyKnown(c));
+
+  if (contracts.length === 0) return [];
+
+  // Probe each in parallel with a reasonable concurrency cap (Promise.all is fine
+  // here since MAX_CONTRACTS_TO_PROBE caps the fan-out at 30).
+  const results = await Promise.all(
+    contracts.map((c) =>
+      resolveDiscoveredToken(c, accountId).catch((e) => {
+        console.error(
+          `[contract-discovery] resolveDiscoveredToken(${c}) failed:`,
+          e.message
+        );
+        return null;
+      })
+    )
   );
 
-  const tokens = resolved.filter((t) => t !== null);
-  setCached(address, tokens);
-  return tokens;
-}
-
-function clearCache(address) {
-  if (address) discoveryCache.delete(address);
-  else discoveryCache.clear();
+  return results.filter((r) => r !== null);
 }
 
 module.exports = {
   discoverSorobanTokens,
-  clearCache,
-  // exported for tests
-  _internal: { extractContractIdFromOp, probeIsToken },
 };
