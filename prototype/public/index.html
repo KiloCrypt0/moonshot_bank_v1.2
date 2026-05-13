@@ -2637,65 +2637,112 @@
     // ── Render NFTs ───────────────────────────────────────────
     async function renderNfts(container) {
       if (!nftsData) {
-        container.innerHTML = '<div class="loading"><div class="spinner"></div><div style="color:var(--text-secondary)">Scanning balances and resolving issuer metadata…</div></div>';
+        container.innerHTML = '<div class="loading"><div class="spinner"></div><div style="color:var(--text-secondary)">Scanning balances and resolving issuer metadata… <br/><span style="font-size:11px">(checking classic assets + Soroban contracts)</span></div></div>';
         try {
-          const res = await fetch(`${API_BASE}/api/v1/account/${currentData.address}/nfts`);
-          nftsData = await res.json();
+          // Fire both requests in parallel: SEP-39 classic-asset NFTs and
+          // SEP-50 Soroban-contract NFTs (incl. Meridian Pay).
+          const [classicRes, sorobanRes] = await Promise.all([
+            fetch(`${API_BASE}/api/v1/account/${currentData.address}/nfts`).then((r) => r.json()).catch(() => ({ nfts: [] })),
+            fetch(`${API_BASE}/api/v1/account/${currentData.address}/collectibles`).then((r) => r.json()).catch(() => ({ collections: [] })),
+          ]);
+          nftsData = { classic: classicRes, soroban: sorobanRes };
         } catch (e) {
           container.innerHTML = '<div class="error-banner">Failed to load NFTs</div>';
           return;
         }
       }
 
-      const nfts = nftsData.nfts || [];
-      if (nfts.length === 0) {
+      const classicNfts = (nftsData.classic && nftsData.classic.nfts) || [];
+      const sorobanCollections = (nftsData.soroban && nftsData.soroban.collections) || [];
+      const sorobanItemCount = sorobanCollections.reduce((sum, c) => sum + c.count, 0);
+      const totalCount = classicNfts.length + sorobanItemCount;
+
+      if (totalCount === 0) {
         container.innerHTML = `
           <div class="empty-state">
             No NFTs detected.
             <div style="font-size: 12px; margin-top: 6px;">
-              We classify a holding as an NFT when supply is small and the issuer publishes SEP-1 metadata.
+              Checked classic Stellar assets (SEP-39) and Soroban smart-contract collections (SEP-50).
             </div>
           </div>`;
         return;
       }
 
-      const cards = nfts.map((n) => {
-        const name = (n.metadata && n.metadata.name) || n.asset.code;
-        const code = n.asset.code;
-        const image = n.metadata && n.metadata.image;
-        const confidenceClass = n.confidence >= 0.7 ? "high" : n.confidence >= 0.5 ? "med" : "low";
-        const confidenceLabel = n.confidence >= 0.7 ? "Likely" : n.confidence >= 0.5 ? "Probable" : "Maybe";
-        const supplyLabel = n.supply !== null && n.supply !== undefined
-          ? `supply ${n.supply <= 1 ? n.supply : fmt(n.supply, 0)}`
-          : "supply unknown";
+      let html = "";
 
-        const imageHtml = image
-          ? `<img class="nft-card-image" src="${escapeHtml(image)}" alt="${escapeHtml(name)}" loading="lazy" onerror="this.outerHTML='<div class=&quot;nft-card-image-fallback&quot;>'+this.alt.slice(0,2).toUpperCase()+'</div>'">`
-          : `<div class="nft-card-image-fallback">${escapeHtml(code.slice(0, 2).toUpperCase())}</div>`;
-
-        const domain = n.asset.domain
-          ? `<a href="https://${escapeHtml(n.asset.domain)}" target="_blank" rel="noopener" style="color: var(--text-muted); text-decoration: none;">${escapeHtml(n.asset.domain)}</a>`
-          : "no domain";
-
-        return `
-          <div class="nft-card">
-            ${imageHtml}
-            <div class="nft-card-body">
-              <div class="nft-card-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
-              <div class="nft-card-code">${escapeHtml(code)} · ${escapeHtml(shortenAddr(n.asset.issuer))}</div>
-              <div class="nft-card-meta">
-                <span>${domain}</span>
-                <span class="nft-confidence ${confidenceClass}">${confidenceLabel}</span>
+      // ── Soroban (SEP-50) collections — group by collection ──
+      for (const col of sorobanCollections) {
+        html += `
+          <div style="margin-top: 8px; margin-bottom: 16px;">
+            <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:12px;">
+              <div>
+                <div style="font-size:16px; font-weight:600; color:var(--text-primary);">${escapeHtml(col.name)}</div>
+                <div style="font-size:11px; color:var(--text-muted); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; margin-top:2px;">
+                  ${escapeHtml(col.symbol)} · ${escapeHtml(shortenAddr(col.address))} · Soroban
+                </div>
               </div>
-              <div class="nft-card-meta">
-                <span>${supplyLabel}</span>
-                <span>bal ${escapeHtml(n.balance)}</span>
-              </div>
+              <div style="font-size:12px; color:var(--text-secondary);">${col.count} item${col.count === 1 ? "" : "s"}</div>
+            </div>
+            <div class="nft-grid">
+              ${col.items.map((item) => {
+                const name = (item.metadata && item.metadata.name) || `#${item.tokenId}`;
+                const image = item.metadata && item.metadata.image;
+                const desc = (item.metadata && item.metadata.description) || "";
+
+                const imageHtml = image
+                  ? `<img class="nft-card-image" src="${escapeHtml(image)}" alt="${escapeHtml(name)}" loading="lazy" onerror="this.outerHTML='<div class=&quot;nft-card-image-fallback&quot;>NFT</div>'">`
+                  : `<div class="nft-card-image-fallback">#${escapeHtml(item.tokenId)}</div>`;
+
+                return `
+                  <div class="nft-card">
+                    ${imageHtml}
+                    <div class="nft-card-body">
+                      <div class="nft-card-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
+                      <div class="nft-card-code">Token #${escapeHtml(item.tokenId)}</div>
+                      ${desc ? `<div class="nft-card-meta" style="display:block; font-size:11px; line-height:1.4; margin-top:6px; color:var(--text-muted);">${escapeHtml(desc.length > 100 ? desc.slice(0, 100) + "…" : desc)}</div>` : ""}
+                    </div>
+                  </div>`;
+              }).join("")}
             </div>
           </div>`;
-      }).join("");
+      }
 
-      container.innerHTML = `<div class="nft-grid">${cards}</div>`;
+      // ── Classic SEP-39 NFTs (with confidence heuristic) ──
+      if (classicNfts.length > 0) {
+        html += `
+          <div style="margin-top: 24px; margin-bottom: 12px;">
+            <div style="font-size:16px; font-weight:600; color:var(--text-primary);">Classic Stellar NFTs</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">SEP-39 trustline assets with NFT-like properties</div>
+          </div>
+          <div class="nft-grid">
+            ${classicNfts.map((n) => {
+              const name = (n.metadata && n.metadata.name) || n.asset.code;
+              const code = n.asset.code;
+              const image = n.metadata && n.metadata.image;
+              const confidenceClass = n.confidence >= 0.7 ? "high" : n.confidence >= 0.5 ? "med" : "low";
+              const confidenceLabel = n.confidence >= 0.7 ? "Likely" : n.confidence >= 0.5 ? "Probable" : "Maybe";
+
+              const imageHtml = image
+                ? `<img class="nft-card-image" src="${escapeHtml(image)}" alt="${escapeHtml(name)}" loading="lazy" onerror="this.outerHTML='<div class=&quot;nft-card-image-fallback&quot;>'+this.alt.slice(0,2).toUpperCase()+'</div>'">`
+                : `<div class="nft-card-image-fallback">${escapeHtml(code.slice(0, 2).toUpperCase())}</div>`;
+
+              return `
+                <div class="nft-card">
+                  ${imageHtml}
+                  <div class="nft-card-body">
+                    <div class="nft-card-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
+                    <div class="nft-card-code">${escapeHtml(code)} · ${escapeHtml(shortenAddr(n.asset.issuer))}</div>
+                    <div class="nft-card-meta">
+                      <span>${n.asset.domain ? escapeHtml(n.asset.domain) : "no domain"}</span>
+                      <span class="nft-confidence ${confidenceClass}">${confidenceLabel}</span>
+                    </div>
+                  </div>
+                </div>`;
+            }).join("")}
+          </div>`;
+      }
+
+      container.innerHTML = html;
     }
 
     // Minimal HTML escaper for untrusted metadata fields (stellar.toml content
