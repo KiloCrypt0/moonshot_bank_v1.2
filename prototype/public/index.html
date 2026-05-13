@@ -888,6 +888,87 @@
       border-radius: 3px;
     }
 
+    /* ── Pie Chart ──────────────────────────────────────────── */
+    .pie-chart-section {
+      display: flex;
+      gap: 32px;
+      align-items: center;
+      margin-bottom: 32px;
+      padding: 24px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+
+    .pie-chart-section h3 {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin: 0 0 16px 0;
+    }
+
+    .pie-canvas-wrap {
+      flex-shrink: 0;
+      position: relative;
+    }
+
+    .pie-canvas-wrap canvas {
+      display: block;
+      cursor: default;
+    }
+
+    .pie-legend {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .pie-legend-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+
+    .pie-legend-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .pie-legend-label {
+      flex: 1;
+      color: var(--text-secondary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
+    }
+
+    .pie-legend-value {
+      color: var(--text-primary);
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+
+    .pie-legend-pct {
+      color: var(--text-muted);
+      min-width: 42px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    @media (max-width: 600px) {
+      .pie-chart-section { flex-direction: column; align-items: flex-start; }
+    }
+
     /* ── Portfolio Chart ───────────────────────────────────── */
     .chart-container {
       background: var(--bg-card);
@@ -1437,6 +1518,7 @@
       // Now render the portfolio content based on activeView
       if (activeView === "all") {
         app.innerHTML = walletPanelHTML + renderAggregatedContent(d);
+        drawAllocationPieChart(d);
       } else {
         const walletData = d.wallets.find((w) => w.address === activeView);
         if (walletData) {
@@ -1598,6 +1680,16 @@
         ${breakdownHTML}
         ${legendHTML}
 
+        <div class="pie-chart-section">
+          <div class="pie-canvas-wrap">
+            <canvas id="allocationPieCanvas" width="200" height="200" style="width:200px;height:200px;"></canvas>
+          </div>
+          <div style="flex:1;min-width:0;">
+            <h3>Portfolio by Wallet</h3>
+            <div class="pie-legend" id="pieLegend"></div>
+          </div>
+        </div>
+
         <div class="stats-grid">
           <div class="stat-card">
             <div class="stat-label">Wallets</div>
@@ -1625,6 +1717,144 @@
 
         ${tokenHTML}
       `;
+    }
+
+    function drawAllocationPieChart(d) {
+      const canvas = document.getElementById("allocationPieCanvas");
+      if (!canvas) return;
+      const wallets = (d.wallets || []).filter((w) => w.totalValueUSD > 0);
+      if (wallets.length === 0) return;
+
+      const dpr = window.devicePixelRatio || 1;
+      const size = 200;
+      canvas.width = size * dpr;
+      canvas.height = size * dpr;
+      canvas.style.width = size + "px";
+      canvas.style.height = size + "px";
+
+      const ctx = canvas.getContext("2d");
+      ctx.scale(dpr, dpr);
+
+      const cx = size / 2;
+      const cy = size / 2;
+      const outerR = size / 2 - 6;
+      const innerR = outerR * 0.56;
+      const BG = "#1a2332"; // --bg-card
+
+      const total = wallets.reduce((s, w) => s + w.totalValueUSD, 0);
+      const colors = wallets.map((_, i) => {
+        const grad = getWalletColor(i);
+        return grad.replace("linear-gradient(135deg, ", "").split(",")[0].trim();
+      });
+
+      function drawSlices(highlightIdx) {
+        ctx.clearRect(0, 0, size, size);
+        let start = -Math.PI / 2;
+        wallets.forEach((w, i) => {
+          const sweep = (w.totalValueUSD / total) * 2 * Math.PI;
+          ctx.save();
+          if (i === highlightIdx) {
+            const mid = start + sweep / 2;
+            ctx.translate(Math.cos(mid) * 7, Math.sin(mid) * 7);
+          }
+          ctx.beginPath();
+          ctx.moveTo(cx, cy);
+          ctx.arc(cx, cy, outerR, start, start + sweep);
+          ctx.closePath();
+          ctx.fillStyle = colors[i];
+          ctx.fill();
+          ctx.restore();
+          start += sweep;
+        });
+
+        // Donut hole
+        ctx.beginPath();
+        ctx.arc(cx, cy, innerR, 0, 2 * Math.PI);
+        ctx.fillStyle = BG;
+        ctx.fill();
+
+        // Center label
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        if (highlightIdx >= 0) {
+          const w = wallets[highlightIdx];
+          ctx.fillStyle = "#e2e8f0";
+          ctx.font = `bold 13px -apple-system, sans-serif`;
+          ctx.fillText(fmtUSD(w.totalValueUSD), cx, cy - 9);
+          ctx.fillStyle = "#64748b";
+          ctx.font = `12px -apple-system, sans-serif`;
+          ctx.fillText(((w.totalValueUSD / total) * 100).toFixed(1) + "%", cx, cy + 9);
+        } else {
+          ctx.fillStyle = "#e2e8f0";
+          ctx.font = `bold 13px -apple-system, sans-serif`;
+          ctx.fillText(fmtBigUSD(total), cx, cy - 9);
+          ctx.fillStyle = "#64748b";
+          ctx.font = `12px -apple-system, sans-serif`;
+          ctx.fillText("Total", cx, cy + 9);
+        }
+
+        // Update legend opacity
+        document.querySelectorAll(".pie-legend-item").forEach((el, i) => {
+          el.style.opacity = highlightIdx < 0 || i === highlightIdx ? "1" : "0.35";
+        });
+      }
+
+      function sliceAt(mx, my) {
+        const dx = mx - cx;
+        const dy = my - cy;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < innerR || dist > outerR) return -1;
+        let angle = Math.atan2(dy, dx) + Math.PI / 2;
+        if (angle < 0) angle += 2 * Math.PI;
+        let cum = 0;
+        for (let i = 0; i < wallets.length; i++) {
+          cum += (wallets[i].totalValueUSD / total) * 2 * Math.PI;
+          if (angle <= cum) return i;
+        }
+        return -1;
+      }
+
+      // Build legend
+      const legendEl = document.getElementById("pieLegend");
+      if (legendEl) {
+        legendEl.innerHTML = wallets.map((w, i) => {
+          const pct = ((w.totalValueUSD / total) * 100).toFixed(1);
+          const label = w.label || shortenAddr(w.address);
+          return `<div class="pie-legend-item" data-idx="${i}" onclick="switchWalletView('${w.address}')">
+            <div class="pie-legend-dot" style="background:${colors[i]};"></div>
+            <span class="pie-legend-label" title="${w.label || w.address}">${label}</span>
+            <span class="pie-legend-value">${fmtUSD(w.totalValueUSD)}</span>
+            <span class="pie-legend-pct">${pct}%</span>
+          </div>`;
+        }).join("");
+      }
+
+      drawSlices(-1);
+
+      let hovered = -1;
+      canvas.addEventListener("mousemove", (e) => {
+        const r = canvas.getBoundingClientRect();
+        const scaleX = size / r.width;
+        const scaleY = size / r.height;
+        const idx = sliceAt((e.clientX - r.left) * scaleX, (e.clientY - r.top) * scaleY);
+        if (idx !== hovered) {
+          hovered = idx;
+          canvas.style.cursor = idx >= 0 ? "pointer" : "default";
+          drawSlices(idx);
+        }
+      });
+      canvas.addEventListener("mouseleave", () => {
+        hovered = -1;
+        canvas.style.cursor = "default";
+        drawSlices(-1);
+      });
+      canvas.addEventListener("click", (e) => {
+        const r = canvas.getBoundingClientRect();
+        const scaleX = size / r.width;
+        const scaleY = size / r.height;
+        const idx = sliceAt((e.clientX - r.left) * scaleX, (e.clientY - r.top) * scaleY);
+        if (idx >= 0) switchWalletView(wallets[idx].address);
+      });
     }
 
     function switchWalletView(view) {
