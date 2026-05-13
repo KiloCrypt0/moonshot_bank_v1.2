@@ -991,6 +991,55 @@ app.post("/api/v1/history/downsample", (req, res) => {
   }
 });
 
+// Top XLM whales leaderboard
+const EXCLUDED_WHALES = new Set([
+  "GALAXYVOIDAOPZTDLHILAJQKCVVFMD4IKLXLSZV5YHO7VY74IWZILUTO", // burned
+  // SDF mandate addresses
+  "GB6NVEN5HSUBKMYCE5ZOWSK5K23TBWRUQLZY3KNMXUZ3AQ2ESC4MY4AQ",
+  "GATL3ETTZ3XDGFXX2ELPIKCZL7S5D2HY3VK4T7LRPD6DW5JOLAEZSZBA",
+  "GAKGC35HMNB7A3Q2V5SQU6VJC2JFTZB6I7ZW77SJSMRCOX2ZFBGJOCHH",
+  "GAPV2C4BTHXPL2IVYDXJ5PUU7Q3LAXU7OAQDP7KVYHLCNM2JTAJNOQQI",
+  "GCVJDBALC2RQFLD2HYGQGWNFZBCOD2CPOTN3LE7FWRZ44H2WRAVZLFCU",
+  "GC3ITNZSVVPOWZ5BU7S64XKNI5VPTRSBEXXLS67V4K6LEUETWBMTE7IH",
+  "GBEVKAYIPWC5AQT6D4N7FC3XGKRRBMPCAMTO3QZWMHHACLHTMAHAM2TP",
+  "GDUY7J7A33TQWOSOQGDO776GGLM3UQERL4J3SPT56F6YS4ID7MLDERI4",
+  "GCPWKVQNLDPD4RNP5CAXME4BEDTKSSYRR4MMEL4KG65NEGCOGNJW7QI2",
+  "GDKIJJIKXLOM2NRMPNQZUUYK24ZPVFC6426GZAEP3KUK6KEJLACCWNMX",
+  "GDWXQOTIIDO2EUK4DIGIBLEHLME2IAJRNU6JDFS5B2ZTND65P7J36WQZ",
+  "GAMGGUQKKJ637ILVDOSCT5X7HYSZDUPGXSUW67B2UKMG2HEN5TPWN3LQ",
+  "GANII5Y2LABEBK74NWNKS4NREX2T52YTBGQDRVKVBFRIIF5VE4ORYOVY",
+  "GBFZPAHO24P7ZVZCMI5SXZR53UYD325OWSSWWHHVLBNN56LU5YZJJFNP",
+]);
+
+app.get("/api/v1/whales", async (req, res) => {
+  try {
+    // Fetch extra to have enough after filtering
+    const response = await fetch("https://api.stellar.expert/explorer/public/asset/XLM/holders?order=desc&limit=40");
+    const data = await response.json();
+    const records = data._embedded?.records || [];
+
+    const filtered = records
+      .filter(a => !EXCLUDED_WHALES.has(a.address))
+      .slice(0, 10);
+
+    const h = getHorizon();
+    const whales = await Promise.all(filtered.map(async (a) => {
+      const xlmBalance = Math.round(parseInt(a.balance) / 10_000_000);
+      let assetCount = null;
+      try {
+        const account = await h.loadAccount(a.address);
+        assetCount = account.balances.length; // includes native XLM + all trustlines
+      } catch (e) { /* leave null if account can't be loaded */ }
+      return { address: a.address, balance: xlmBalance, assetCount };
+    }));
+
+    res.json({ whales });
+  } catch (e) {
+    console.error("Whales error:", e.message);
+    res.status(500).json({ error: "Failed to fetch whales" });
+  }
+});
+
 // Health check
 app.get("/api/health", (req, res) => {
   res.json({
