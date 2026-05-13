@@ -1,26 +1,32 @@
 /**
- * Soroban Token Auto-Discovery
+ * Soroban Token Auto-Discovery (probe-based)
  *
- * Discovers SEP-41 Soroban tokens a wallet has interacted with by scanning
- * its operation history for invoke_host_function operations.
+ * For any given wallet address, find every Soroban SEP-41 token the wallet
+ * holds, regardless of when (or whether) the wallet last interacted with the
+ * contract.
  *
- * Strategy:
- *   1. Pull recent operations from Horizon
- *   2. Filter to invoke_host_function ops (Soroban contract calls)
- *   3. For each unique contract called, check if it's an SEP-41 token
- *      (has `balance`, `symbol`, `decimals` view functions)
- *   4. Query the wallet's balance on each
- *   5. Return non-zero balances
+ * Algorithm:
+ *   1. Build the candidate set:
+ *        universe = (active token universe) ∪ (wallet's historical hits from cache)
+ *      The universe contains every Soroban token we know about from CoinGecko,
+ *      Soroswap's curated list, and stellar.expert's top contracts.
+ *      The historical hits are contracts we've previously seen this wallet
+ *      hold, even if they've since left the active universe.
+ *   2. Probe `balance(wallet)` on each candidate in parallel (bounded
+ *      concurrency to avoid hammering Soroban RPC).
+ *   3. Cache every probe in discovered_balances so:
+ *        - Subsequent lookups skip already-seen-zero contracts inside the cache
+ *          window (configurable).
+ *        - Once-seen-non-zero contracts are forever-sticky to that wallet.
+ *   4. For non-zero results, resolve metadata + price via the pricing engine.
  *
- * This is best-effort — it depends on the user having actually interacted
- * with the token contract (e.g. transferred, claimed, swapped). Pure
- * passive holdings (received but never touched) won't be discovered via
- * operation history alone; a future enhancement could scan Soroban events
- * (`SAC` mint/transfer events) for completeness.
+ * This replaces the previous operation-history-based discovery (PR #1), which
+ * had a fundamental aging-out problem: after a wallet accumulated ~200 ops of
+ * any kind, its earlier Soroban interactions were no longer visible. Passive
+ * holders simply disappeared from discovery. The probe approach has no such
+ * limit — if the balance exists on-chain, it's found.
  */
 
-const StellarSdk = require("@stellar/stellar-sdk");
-const { Address, scValToNative, xdr } = StellarSdk;
 const {
   getTokenBalance,
   getTokenMetadata,
@@ -28,106 +34,176 @@ const {
 } = require("./soroban-rpc");
 const { SOROBAN_TOKEN_REGISTRY } = require("./token-resolver");
 const { enrichSorobanTokenWithPrice } = require("./pricing-engine");
+const tokenUniverse = require("./token-universe");
+const historyDb = require("./history-db");
 
-const HORIZON_URL = process.env.HORIZON_URL || "https://horizon.stellar.org";
+// Max parallel balance probes. Soroban RPC public endpoints can handle bursts
+// but we don't want to be antisocial. 20 is fast enough for ~150-contract
+// universes (~1-3 seconds total) while staying friendly.
+const PROBE_CONCURRENCY = parseInt(process.env.DISCOVERY_PROBE_CONCURRENCY || "20", 10);
 
-// Max operations to scan per wallet. Stellar accounts can have thousands of
-// operations; we cap at a reasonable recent window to keep latency bounded.
-const MAX_OPS_TO_SCAN = parseInt(process.env.DISCOVERY_MAX_OPS || "200", 10);
-
-// Cap on distinct contracts to probe per wallet (defense in depth — a wallet
-// that interacted with hundreds of contracts shouldn't fan out into hundreds
-// of metadata queries).
-const MAX_CONTRACTS_TO_PROBE = parseInt(
-  process.env.DISCOVERY_MAX_CONTRACTS || "30",
+// Cache TTL for zero-balance results. Within this window, we skip re-probing
+// a wallet/contract pair we've recently seen at zero. Default 5 min.
+const ZERO_BALANCE_CACHE_TTL_MS = parseInt(
+  process.env.DISCOVERY_ZERO_CACHE_TTL_MS || "300000",
   10
 );
 
-// Contracts already known via the static registry — skip these to avoid
-// double-resolution (token-resolver.js handles them).
-function _isAlreadyKnown(contractId) {
-  return SOROBAN_TOKEN_REGISTRY.some(
-    (t) => t.contractId === contractId
-  );
-}
+// Cache TTL for non-zero balance results. Within this window we trust the
+// cached balance without re-probing. Default 60s (matches pricing TTL).
+const NONZERO_BALANCE_CACHE_TTL_MS = parseInt(
+  process.env.DISCOVERY_NONZERO_CACHE_TTL_MS || "60000",
+  10
+);
 
-/**
- * Pull recent invoke_host_function operations for a wallet and extract the
- * distinct contract addresses called.
- *
- * @param {string} accountId G-strkey of the wallet
- * @returns {Promise<string[]>} array of unique contract IDs (C-strkeys)
- */
-async function _findCalledContracts(accountId) {
-  const url = `${HORIZON_URL}/accounts/${accountId}/operations?order=desc&limit=200&include_failed=false`;
-  const res = await fetch(url);
-  if (!res.ok) {
-    console.error(`[contract-discovery] Horizon ${res.status} for ${accountId}`);
-    return [];
-  }
-  const data = await res.json();
-  const ops = (data._embedded && data._embedded.records) || [];
+// ── Concurrency helper ───────────────────────────────────────────────────────
 
-  const seen = new Set();
-  for (const op of ops.slice(0, MAX_OPS_TO_SCAN)) {
-    if (op.type !== "invoke_host_function") continue;
-    // The host_function payload encodes which contract was invoked.
-    // Horizon decodes this into op.function = "HostFunctionTypeHostFunctionTypeInvokeContract"
-    // and op.parameters[0] = the contract address.
-    if (
-      op.parameters &&
-      Array.isArray(op.parameters) &&
-      op.parameters.length > 0
-    ) {
-      const firstParam = op.parameters[0];
-      // The contract address is in different fields depending on Horizon version
-      const candidate =
-        firstParam.value || firstParam.address || firstParam.contractId;
-      if (
-        candidate &&
-        typeof candidate === "string" &&
-        candidate.startsWith("C") &&
-        candidate.length >= 56
-      ) {
-        seen.add(candidate);
+async function _parallelMap(items, concurrency, fn) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (true) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      try {
+        results[i] = await fn(items[i], i);
+      } catch (e) {
+        results[i] = { __error: e.message };
       }
     }
-  }
-  return Array.from(seen).slice(0, MAX_CONTRACTS_TO_PROBE);
+  });
+  await Promise.all(workers);
+  return results;
 }
 
+// ── Cache check ──────────────────────────────────────────────────────────────
+
+function _isCacheFresh(cachedRow, ttlMs) {
+  if (!cachedRow || !cachedRow.last_checked_at) return false;
+  const lastChecked = new Date(cachedRow.last_checked_at + "Z").getTime();
+  if (!Number.isFinite(lastChecked)) return false;
+  return Date.now() - lastChecked < ttlMs;
+}
+
+// ── Candidate set construction ───────────────────────────────────────────────
+
 /**
- * Resolve a single discovered contract into a SEP-41 token result, or null
- * if it isn't a token / wallet has no balance / probe failed.
+ * Build the candidate set of contract IDs to probe for this wallet.
+ * Union of (active universe) and (historical hits for this wallet).
  */
-async function resolveDiscoveredToken(contractId, accountId) {
-  // Try to get metadata first. If the contract doesn't expose `symbol`/`decimals`,
-  // it's not a SEP-41 token and we skip it.
-  let meta;
+function _candidateSet(walletAddress) {
+  const universeIds = new Set(tokenUniverse.getContractIds());
+  const historical = historyDb.getHistoricalContractsForWallet(walletAddress);
+  for (const h of historical) {
+    universeIds.add(h.contract_id);
+  }
+  return Array.from(universeIds);
+}
+
+// ── Single-contract probe ────────────────────────────────────────────────────
+
+/**
+ * Probe one contract for a wallet's balance, with cache awareness.
+ * Always records the result back into the discovery cache.
+ *
+ * Returns: { contractId, rawBalance: BigInt, isCacheHit: boolean } | null
+ *   (returns null if balance is zero — caller filters these out)
+ */
+async function _probeContract(walletAddress, contractId) {
+  // Cache check
+  const cached = historyDb.getDiscoveredBalance(walletAddress, contractId);
+  if (cached) {
+    const isZero = !cached.balance_raw || cached.balance_raw === "0";
+    const ttl = isZero ? ZERO_BALANCE_CACHE_TTL_MS : NONZERO_BALANCE_CACHE_TTL_MS;
+    if (_isCacheFresh(cached, ttl)) {
+      if (isZero) return null;
+      return {
+        contractId,
+        rawBalance: BigInt(cached.balance_raw),
+        decimals: cached.decimals,
+        symbol: cached.symbol,
+        isCacheHit: true,
+      };
+    }
+  }
+
+  // Cache miss or stale — probe on-chain
+  let rawBalanceStr;
   try {
-    meta = await getTokenMetadata(contractId);
+    rawBalanceStr = await getTokenBalance(contractId, walletAddress);
   } catch (e) {
+    // Probe failure — record nothing, return null. Don't poison the cache
+    // with a false zero on a transient RPC error.
     return null;
   }
-  if (!meta || !meta.symbol || meta.decimals == null) return null;
 
-  // Then query balance.
-  let rawBalance;
+  // getTokenBalance returns "0" both for actual zero and for failed simulation.
+  // For our purposes that's fine — both mean "no priceable balance found right now".
+  const rawBalance = BigInt(rawBalanceStr || "0");
+
+  // Update cache (always — including zero results, to short-circuit future probes)
   try {
-    rawBalance = await getTokenBalance(contractId, accountId);
+    historyDb.upsertDiscoveredBalance(walletAddress, contractId, {
+      balanceRaw: rawBalance.toString(),
+      decimals: cached?.decimals || null,
+      symbol: cached?.symbol || null,
+    });
   } catch (e) {
-    return null;
+    // Cache write failure is non-fatal
   }
-  if (!rawBalance || rawBalance === 0n) return null;
 
-  const balance = formatTokenAmount(rawBalance, meta.decimals);
+  if (rawBalance === 0n) return null;
 
-  // Match the exact shape resolveSorobanTokens() returns so the existing
-  // frontend handles this without any change.
+  return {
+    contractId,
+    rawBalance,
+    decimals: cached?.decimals || null,
+    symbol: cached?.symbol || null,
+    isCacheHit: false,
+  };
+}
+
+// ── Resolve non-zero hit into the full token shape ───────────────────────────
+
+/**
+ * Given a non-zero balance hit, build the full token shape expected by the
+ * frontend. Fetches metadata (if not already cached) and enriches with price.
+ */
+async function _resolveHit(walletAddress, hit) {
+  let { contractId, rawBalance, decimals, symbol } = hit;
+
+  // Fetch metadata if we don't have it cached
+  if (decimals == null || !symbol) {
+    try {
+      const meta = await getTokenMetadata(contractId);
+      if (meta) {
+        decimals = meta.decimals;
+        symbol = meta.symbol;
+        // Update cache with the metadata we learned
+        try {
+          historyDb.upsertDiscoveredBalance(walletAddress, contractId, {
+            balanceRaw: rawBalance.toString(),
+            decimals,
+            symbol,
+          });
+          // Also seed it into the runtime universe so other lookups benefit
+          tokenUniverse.add(contractId, { symbol, decimals, source: "discovered" });
+        } catch (e) { /* non-fatal */ }
+      }
+    } catch (e) {
+      // metadata fetch failure — leave defaults
+    }
+  }
+
+  if (decimals == null) decimals = 7;  // Stellar default
+  if (!symbol) symbol = "???";
+
+  const balance = formatTokenAmount(rawBalance, decimals);
+
   const token = {
     type: "soroban_token",
     asset: {
-      code: meta.symbol,
+      code: symbol,
       issuer: null,
       contractId,
       domain: null,
@@ -135,65 +211,81 @@ async function resolveDiscoveredToken(contractId, accountId) {
       category: "discovered",
     },
     balance,
-    rawBalance,
-    decimals: meta.decimals,
+    rawBalance: rawBalance.toString(),
+    decimals,
     valueUSD: 0,
     price: null,
-    source: "soroban_discovery",
+    source: "soroban_discovery_probe",
   };
 
-  // Enrich with price from the pricing engine (CoinGecko → Aggregator → unpriced).
-  // Failures here leave the token visible but unpriced — never block.
+  // Enrich with price (best-effort; failures leave token visible but unpriced)
   try {
     await enrichSorobanTokenWithPrice(token);
   } catch (e) {
-    // swallow — token stays unpriced
+    // swallow
   }
+
   return token;
 }
 
+// ── Public API ───────────────────────────────────────────────────────────────
+
 /**
- * Main entry point. Discover all SEP-41 Soroban tokens a wallet has any
- * non-zero balance in.
+ * Discover all Soroban SEP-41 tokens a wallet holds (non-zero balance).
  *
- * @param {string} accountId G-strkey of the wallet
- * @returns {Promise<object[]>} array of token results
+ * Same interface as the original PR #1 function, drop-in replacement.
+ * Internally uses probe-against-universe rather than operation-history scan.
+ *
+ * @param {string} accountId G-strkey
+ * @returns {Promise<object[]>} array of token results, ready for the frontend
  */
 async function discoverSorobanTokens(accountId) {
-  if (!accountId || typeof accountId !== "string" || !accountId.startsWith("G")) {
+  if (
+    !accountId ||
+    typeof accountId !== "string" ||
+    !accountId.startsWith("G") ||
+    accountId.length !== 56
+  ) {
     return [];
   }
 
-  let contracts;
-  try {
-    contracts = await _findCalledContracts(accountId);
-  } catch (e) {
-    console.error(`[contract-discovery] failed for ${accountId}:`, e.message);
-    return [];
-  }
+  // Exclude contracts already covered by the static registry (token-resolver.js
+  // handles them via its own path).
+  const registryIds = new Set(SOROBAN_TOKEN_REGISTRY.map((t) => t.contractId));
 
-  // Filter out already-known tokens from the static registry
-  contracts = contracts.filter((c) => !_isAlreadyKnown(c));
+  const candidates = _candidateSet(accountId).filter((c) => !registryIds.has(c));
 
-  if (contracts.length === 0) return [];
+  if (candidates.length === 0) return [];
 
-  // Probe each in parallel with a reasonable concurrency cap (Promise.all is fine
-  // here since MAX_CONTRACTS_TO_PROBE caps the fan-out at 30).
-  const results = await Promise.all(
-    contracts.map((c) =>
-      resolveDiscoveredToken(c, accountId).catch((e) => {
-        console.error(
-          `[contract-discovery] resolveDiscoveredToken(${c}) failed:`,
-          e.message
-        );
-        return null;
-      })
-    )
+  // Probe all candidates in parallel
+  const results = await _parallelMap(candidates, PROBE_CONCURRENCY, (contractId) =>
+    _probeContract(accountId, contractId)
   );
 
-  return results.filter((r) => r !== null);
+  // Filter to actual hits (non-null, non-error)
+  const hits = results.filter((r) => r && !r.__error);
+
+  if (hits.length === 0) return [];
+
+  // Resolve each hit into the full token shape (parallel; metadata + price)
+  const tokens = await Promise.all(hits.map((h) => _resolveHit(accountId, h)));
+
+  return tokens.filter((t) => t != null);
+}
+
+// ── Stats / debugging ────────────────────────────────────────────────────────
+
+function stats() {
+  return {
+    universe: tokenUniverse.stats(),
+    cache: historyDb.getDiscoveryStats(),
+    concurrency: PROBE_CONCURRENCY,
+    zeroCacheTtlMs: ZERO_BALANCE_CACHE_TTL_MS,
+    nonzeroCacheTtlMs: NONZERO_BALANCE_CACHE_TTL_MS,
+  };
 }
 
 module.exports = {
   discoverSorobanTokens,
+  stats,
 };
