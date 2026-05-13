@@ -1285,7 +1285,7 @@
       <div class="search-box">
         <input type="text" id="addressInput" placeholder="Enter Stellar address (G...)" spellcheck="false" />
         <button class="btn" id="searchBtn" onclick="loadPortfolio()">Look Up</button>
-        <button class="btn btn-secondary" id="addToPortfolioBtn" onclick="addCurrentToPortfolio()" title="Add to portfolio" style="padding: 12px 14px;">+</button>
+        <button class="btn btn-secondary" id="addToPortfolioBtn" onclick="addCurrentToPortfolio()" title="Add this address to your portfolio" style="padding: 12px 14px; font-size: 13px;">+ Save</button>
       </div>
     </div>
     <div class="header-right">
@@ -1356,6 +1356,7 @@
     let timeTravelSnapshot = null;  // Snapshot data when viewing historical
 
     const API_BASE = window.location.origin;
+    const WELCOME_HTML = document.getElementById("app").innerHTML; // Save initial welcome screen
 
     const WALLET_COLORS = [
       "linear-gradient(135deg, #6366f1, #8b5cf6)",
@@ -1869,7 +1870,12 @@
     async function addCurrentToPortfolio() {
       const input = document.getElementById("addressInput");
       const address = input.value.trim();
-      if (!address) return;
+      if (!address) {
+        input.focus();
+        input.setAttribute("placeholder", "Enter a Stellar address first, then click +");
+        setTimeout(() => input.setAttribute("placeholder", "Enter Stellar address (G...)"), 3000);
+        return;
+      }
       const label = prompt("Label for this wallet (optional):", "");
       if (await addWalletToPortfolio(address, label)) {
         alert("Wallet added to portfolio!");
@@ -1890,10 +1896,7 @@
       currentTab = "tokens";
       const input = document.getElementById("addressInput");
       if (input) input.value = "";
-      const app = document.getElementById("app");
-      const welcome = document.getElementById("welcomeState");
-      if (app) app.innerHTML = "";
-      if (welcome) welcome.style.display = "block";
+      document.getElementById("app").innerHTML = WELCOME_HTML;
     }
 
     async function enterPortfolioMode() {
