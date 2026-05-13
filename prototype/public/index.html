@@ -1508,6 +1508,7 @@
       </div>
     </div>
     <div class="header-right">
+      <a href="/api/docs" class="btn btn-secondary" style="font-size:13px; padding: 10px 18px; text-decoration:none;">API</a>
       <button class="btn btn-secondary" onclick="enterPortfolioMode()" style="font-size:13px; padding: 10px 18px;">My Portfolio</button>
       <button class="wallet-btn" id="freighterBtn" onclick="connectFreighter()">
         <svg class="wallet-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1940,6 +1941,7 @@
             onkeydown="if(event.key==='Enter')handleAddWallet()" />
           <button class="btn" onclick="handleAddWallet()">Add</button>
         </div>
+        <button class="btn btn-secondary" onclick="showShareModal()" style="width:100%;margin-top:8px;font-size:13px;padding:10px;">Share Portfolio</button>
       </div>`;
 
       // If in time-travel mode, show historical view instead of live
@@ -2333,6 +2335,78 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
       const input = document.getElementById("addressInput");
       if (input) input.value = "";
       document.getElementById("app").innerHTML = WELCOME_HTML;
+    }
+
+    // ── Share Portfolio ────────────────────────────────────────
+    function showShareModal() {
+      const wallets = walletList.length > 0 ? walletList : (currentData ? [{ address: currentData.address, label: currentData.label || "" }] : []);
+      if (wallets.length === 0) { alert("Add a wallet first before sharing."); return; }
+
+      const overlay = document.createElement("div");
+      overlay.id = "shareOverlay";
+      overlay.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:999;display:flex;align-items:center;justify-content:center;";
+      overlay.innerHTML = `
+        <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:16px;padding:32px;max-width:480px;width:90%;">
+          <h3 style="margin-bottom:4px;font-size:18px;">Share your portfolio</h3>
+          <p style="color:var(--text-muted);font-size:13px;margin-bottom:20px;">Create a public page anyone can view.</p>
+          <label style="font-size:13px;color:var(--text-secondary);display:block;margin-bottom:4px;">Display name</label>
+          <input type="text" id="shareDisplayName" placeholder="e.g. Keb" style="width:100%;padding:10px 14px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-size:14px;margin-bottom:12px;outline:none;" />
+          <label style="font-size:13px;color:var(--text-secondary);display:block;margin-bottom:4px;">URL slug</label>
+          <div style="display:flex;align-items:center;gap:0;margin-bottom:12px;">
+            <span style="padding:10px 12px;background:var(--bg-hover);border:1px solid var(--border);border-right:none;border-radius:8px 0 0 8px;font-size:13px;color:var(--text-muted);white-space:nowrap;">/p/</span>
+            <input type="text" id="shareSlug" placeholder="keb" style="flex:1;padding:10px 14px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:0 8px 8px 0;color:var(--text-primary);font-size:14px;outline:none;" />
+          </div>
+          <label style="font-size:13px;color:var(--text-secondary);display:block;margin-bottom:4px;">Bio (optional)</label>
+          <input type="text" id="shareBio" placeholder="Building on Stellar" style="width:100%;padding:10px 14px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-size:14px;margin-bottom:20px;outline:none;" />
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">${wallets.length} wallet${wallets.length !== 1 ? "s" : ""} will be included.</p>
+          <div style="display:flex;gap:12px;">
+            <button class="btn" onclick="submitShareProfile()" style="flex:1;">Create public page</button>
+            <button class="btn btn-secondary" onclick="document.getElementById('shareOverlay').remove()" style="flex:1;">Cancel</button>
+          </div>
+          <div id="shareError" style="color:var(--red);font-size:13px;margin-top:12px;display:none;"></div>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+      overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+      document.getElementById("shareDisplayName").focus();
+    }
+
+    async function submitShareProfile() {
+      const displayName = document.getElementById("shareDisplayName").value.trim();
+      const slug = document.getElementById("shareSlug").value.trim();
+      const bio = document.getElementById("shareBio").value.trim();
+      const errEl = document.getElementById("shareError");
+
+      if (!displayName || !slug) {
+        errEl.textContent = "Name and URL slug are required.";
+        errEl.style.display = "block";
+        return;
+      }
+
+      const wallets = walletList.length > 0
+        ? walletList.map(w => ({ address: w.address, label: w.label || null }))
+        : currentData ? [{ address: currentData.address, label: null }] : [];
+
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/profiles`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ slug, displayName, bio: bio || null, wallets }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          errEl.textContent = data.error || "Failed to create profile.";
+          errEl.style.display = "block";
+          return;
+        }
+        document.getElementById("shareOverlay").remove();
+        const url = window.location.origin + "/p/" + slug;
+        const copied = await navigator.clipboard.writeText(url).then(() => true).catch(() => false);
+        alert("Your public portfolio is live!\n\n" + url + (copied ? "\n\n(Link copied to clipboard!)" : ""));
+      } catch (e) {
+        errEl.textContent = "Network error — try again.";
+        errEl.style.display = "block";
+      }
     }
 
     async function enterPortfolioMode() {
@@ -3014,480 +3088,4 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
             </div>
             <div class="chart-stat">
               <div class="chart-stat-label">Snapshots</div>
-              <div class="chart-stat-value">${data.dataPoints}</div>
-            </div>
-          </div>
-        </div>
-      `;
-
-      // Draw the chart
-      drawPortfolioChart(data.snapshots);
-    }
-
-    function drawPortfolioChart(snapshots) {
-      const canvas = document.getElementById("portfolioCanvas");
-      if (!canvas) return;
-
-      const dpr = window.devicePixelRatio || 1;
-      const rect = canvas.parentElement.getBoundingClientRect();
-      canvas.width = rect.width * dpr;
-      canvas.height = rect.height * dpr;
-      canvas.style.width = rect.width + "px";
-      canvas.style.height = rect.height + "px";
-
-      const ctx = canvas.getContext("2d");
-      ctx.scale(dpr, dpr);
-
-      const w = rect.width;
-      const h = rect.height;
-      const pad = { top: 20, right: 20, bottom: 40, left: 70 };
-      const chartW = w - pad.left - pad.right;
-      const chartH = h - pad.top - pad.bottom;
-
-      const values = snapshots.map(s => s.totalValueUSD);
-      const times = snapshots.map(s => new Date(s.timestamp));
-
-      let minVal = Math.min(...values);
-      let maxVal = Math.max(...values);
-
-      // Add 5% padding on Y axis
-      const yRange = maxVal - minVal || 1;
-      minVal -= yRange * 0.05;
-      maxVal += yRange * 0.05;
-      if (minVal < 0) minVal = 0;
-
-      const xScale = (i) => pad.left + (i / (snapshots.length - 1 || 1)) * chartW;
-      const yScale = (v) => pad.top + chartH - ((v - minVal) / (maxVal - minVal)) * chartH;
-
-      // Clear
-      ctx.clearRect(0, 0, w, h);
-
-      // Grid lines
-      ctx.strokeStyle = "rgba(42,58,78,0.5)";
-      ctx.lineWidth = 1;
-      const gridLines = 5;
-      for (let i = 0; i <= gridLines; i++) {
-        const y = pad.top + (i / gridLines) * chartH;
-        ctx.beginPath();
-        ctx.moveTo(pad.left, y);
-        ctx.lineTo(w - pad.right, y);
-        ctx.stroke();
-
-        // Y axis labels
-        const val = maxVal - (i / gridLines) * (maxVal - minVal);
-        ctx.fillStyle = "#64748b";
-        ctx.font = "11px -apple-system, sans-serif";
-        ctx.textAlign = "right";
-        ctx.fillText("$" + fmt(val, val >= 1000 ? 0 : 2), pad.left - 8, y + 4);
-      }
-
-      // X axis labels
-      const labelCount = Math.min(6, snapshots.length);
-      ctx.textAlign = "center";
-      for (let i = 0; i < labelCount; i++) {
-        const idx = Math.floor(i * (snapshots.length - 1) / (labelCount - 1 || 1));
-        const x = xScale(idx);
-        const t = times[idx];
-        const label = portfolioHistoryRange === "24h"
-          ? t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-          : t.toLocaleDateString([], { month: "short", day: "numeric" });
-        ctx.fillStyle = "#64748b";
-        ctx.fillText(label, x, h - pad.bottom + 20);
-      }
-
-      // Gradient fill
-      const gradient = ctx.createLinearGradient(0, pad.top, 0, pad.top + chartH);
-      const isPositive = values[values.length - 1] >= values[0];
-      if (isPositive) {
-        gradient.addColorStop(0, "rgba(34,197,94,0.25)");
-        gradient.addColorStop(1, "rgba(34,197,94,0.0)");
-      } else {
-        gradient.addColorStop(0, "rgba(239,68,68,0.25)");
-        gradient.addColorStop(1, "rgba(239,68,68,0.0)");
-      }
-
-      ctx.beginPath();
-      ctx.moveTo(xScale(0), yScale(values[0]));
-      for (let i = 1; i < values.length; i++) {
-        ctx.lineTo(xScale(i), yScale(values[i]));
-      }
-      ctx.lineTo(xScale(values.length - 1), pad.top + chartH);
-      ctx.lineTo(xScale(0), pad.top + chartH);
-      ctx.closePath();
-      ctx.fillStyle = gradient;
-      ctx.fill();
-
-      // Line
-      ctx.beginPath();
-      ctx.moveTo(xScale(0), yScale(values[0]));
-      for (let i = 1; i < values.length; i++) {
-        ctx.lineTo(xScale(i), yScale(values[i]));
-      }
-      ctx.strokeStyle = isPositive ? "#22c55e" : "#ef4444";
-      ctx.lineWidth = 2;
-      ctx.lineJoin = "round";
-      ctx.stroke();
-
-      // Interactive tooltip
-      const tooltip = document.getElementById("chartTooltip");
-      const tooltipValue = document.getElementById("tooltipValue");
-      const tooltipTime = document.getElementById("tooltipTime");
-
-      canvas.addEventListener("mousemove", (e) => {
-        const canvasRect = canvas.getBoundingClientRect();
-        const mx = e.clientX - canvasRect.left;
-        const my = e.clientY - canvasRect.top;
-
-        if (mx < pad.left || mx > w - pad.right || my < pad.top || my > pad.top + chartH) {
-          tooltip.style.display = "none";
-          return;
-        }
-
-        // Find nearest data point
-        const ratio = (mx - pad.left) / chartW;
-        const idx = Math.round(ratio * (snapshots.length - 1));
-        const clamped = Math.max(0, Math.min(snapshots.length - 1, idx));
-
-        const px = xScale(clamped);
-        const py = yScale(values[clamped]);
-
-        // Draw crosshair dot
-        drawPortfolioChart.lastDot = { x: px, y: py, idx: clamped };
-
-        tooltipValue.textContent = "$" + fmt(values[clamped]);
-        const t = times[clamped];
-        tooltipTime.textContent = t.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-
-        // Position tooltip
-        let tx = px + 12;
-        if (tx + 160 > w) tx = px - 170;
-        let ty = py - 40;
-        if (ty < 0) ty = py + 12;
-        tooltip.style.left = tx + "px";
-        tooltip.style.top = ty + "px";
-        tooltip.style.display = "block";
-
-        // Redraw with dot
-        drawChartDot(ctx, snapshots, values, times, xScale, yScale, clamped, isPositive, gradient, w, h, pad, chartW, chartH, maxVal, minVal, gridLines);
-      });
-
-      canvas.addEventListener("mouseleave", () => {
-        tooltip.style.display = "none";
-        // Redraw without dot
-        drawPortfolioChart(snapshots);
-      });
-    }
-
-    function drawChartDot(ctx, snapshots, values, times, xScale, yScale, highlightIdx, isPositive, gradient, w, h, pad, chartW, chartH, maxVal, minVal, gridLines) {
-      const dpr = window.devicePixelRatio || 1;
-      ctx.save();
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-      ctx.clearRect(0, 0, w, h);
-
-      // Grid
-      ctx.strokeStyle = "rgba(42,58,78,0.5)";
-      ctx.lineWidth = 1;
-      for (let i = 0; i <= gridLines; i++) {
-        const y = pad.top + (i / gridLines) * chartH;
-        ctx.beginPath();
-        ctx.moveTo(pad.left, y);
-        ctx.lineTo(w - pad.right, y);
-        ctx.stroke();
-        const val = maxVal - (i / gridLines) * (maxVal - minVal);
-        ctx.fillStyle = "#64748b";
-        ctx.font = "11px -apple-system, sans-serif";
-        ctx.textAlign = "right";
-        ctx.fillText("$" + fmt(val, val >= 1000 ? 0 : 2), pad.left - 8, y + 4);
-      }
-
-      // X labels
-      const labelCount = Math.min(6, snapshots.length);
-      ctx.textAlign = "center";
-      for (let i = 0; i < labelCount; i++) {
-        const idx = Math.floor(i * (snapshots.length - 1) / (labelCount - 1 || 1));
-        const t = times[idx];
-        const label = portfolioHistoryRange === "24h"
-          ? t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-          : t.toLocaleDateString([], { month: "short", day: "numeric" });
-        ctx.fillStyle = "#64748b";
-        ctx.fillText(label, xScale(idx), h - pad.bottom + 20);
-      }
-
-      // Fill
-      ctx.beginPath();
-      ctx.moveTo(xScale(0), yScale(values[0]));
-      for (let i = 1; i < values.length; i++) ctx.lineTo(xScale(i), yScale(values[i]));
-      ctx.lineTo(xScale(values.length - 1), pad.top + chartH);
-      ctx.lineTo(xScale(0), pad.top + chartH);
-      ctx.closePath();
-      ctx.fillStyle = gradient;
-      ctx.fill();
-
-      // Line
-      ctx.beginPath();
-      ctx.moveTo(xScale(0), yScale(values[0]));
-      for (let i = 1; i < values.length; i++) ctx.lineTo(xScale(i), yScale(values[i]));
-      ctx.strokeStyle = isPositive ? "#22c55e" : "#ef4444";
-      ctx.lineWidth = 2;
-      ctx.lineJoin = "round";
-      ctx.stroke();
-
-      // Vertical guide line
-      const hx = xScale(highlightIdx);
-      const hy = yScale(values[highlightIdx]);
-      ctx.beginPath();
-      ctx.moveTo(hx, pad.top);
-      ctx.lineTo(hx, pad.top + chartH);
-      ctx.strokeStyle = "rgba(99,102,241,0.3)";
-      ctx.lineWidth = 1;
-      ctx.setLineDash([4, 4]);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      // Dot
-      ctx.beginPath();
-      ctx.arc(hx, hy, 6, 0, Math.PI * 2);
-      ctx.fillStyle = isPositive ? "#22c55e" : "#ef4444";
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(hx, hy, 3, 0, Math.PI * 2);
-      ctx.fillStyle = "#fff";
-      ctx.fill();
-
-      ctx.restore();
-    }
-
-    async function changeChartRange(range) {
-      portfolioHistory = null;
-      portfolioHistoryRange = range;
-      const container = document.getElementById("tabContent");
-      if (container) await renderPortfolioChart(container);
-    }
-
-    // ── Render History ────────────────────────────────────────
-    async function renderHistory(container) {
-      if (!historyData) {
-        container.innerHTML = '<div class="loading"><div class="spinner"></div><div style="color:var(--text-secondary)">Loading history...</div></div>';
-        try {
-          const res = await fetch(`${API_BASE}/api/v1/account/${currentData.address}/history?limit=30`);
-          historyData = await res.json();
-        } catch (e) {
-          container.innerHTML = '<div class="error-banner">Failed to load history</div>';
-          return;
-        }
-      }
-
-      if (!historyData.history || historyData.history.length === 0) {
-        container.innerHTML = '<div class="empty-state">No transaction history</div>';
-        return;
-      }
-
-      let html = '<div class="tx-list">';
-      historyData.history.forEach((tx) => {
-        const typeClass = ["payment", "create_account", "change_trust", "manage_sell_offer", "manage_buy_offer", "path_payment_strict_receive", "path_payment_strict_send"].includes(tx.type) ? tx.type : "default";
-        const typeLabel = tx.type.replace(/_/g, " ");
-
-        let details = "";
-        let amount = "";
-
-        if (tx.type === "payment") {
-          const dir = tx.to === currentData.address ? "from" : "to";
-          const other = dir === "from" ? tx.from : tx.to;
-          details = `<strong>${dir}</strong> ${shortenAddr(other)}`;
-          amount = `${tx.amount} ${tx.assetCode}`;
-        } else if (tx.type === "create_account") {
-          details = `Funded <strong>${shortenAddr(tx.account)}</strong>`;
-          amount = `${tx.startingBalance} XLM`;
-        } else if (tx.type === "change_trust") {
-          details = `${parseFloat(tx.limit) > 0 ? "Added" : "Removed"} trustline for <strong>${tx.assetCode}</strong>`;
-        } else if (tx.type === "manage_sell_offer" || tx.type === "manage_buy_offer") {
-          details = `${tx.sellingAsset} → ${tx.buyingAsset}`;
-          amount = `${tx.amount} @ ${tx.price}`;
-        } else if (tx.type.startsWith("path_payment")) {
-          details = `Swap ${tx.sourceAssetCode || "XLM"} → <strong>${tx.assetCode || "XLM"}</strong>`;
-          amount = `${tx.amount} ${tx.assetCode || "XLM"}`;
-        } else {
-          details = tx.type.replace(/_/g, " ");
-        }
-
-        html += `
-          <div class="tx-row">
-            <div class="tx-type ${typeClass}">${typeLabel}</div>
-            <div class="tx-details">${details}</div>
-            <div class="tx-amount">${amount}</div>
-            <div class="tx-time">${timeAgo(tx.createdAt)}</div>
-          </div>
-        `;
-      });
-      html += "</div>";
-      container.innerHTML = html;
-    }
-
-    // ── Render Claimable ──────────────────────────────────────
-    async function renderClaimable(container) {
-      if (!claimableData) {
-        container.innerHTML = '<div class="loading"><div class="spinner"></div><div style="color:var(--text-secondary)">Loading claimable balances...</div></div>';
-        try {
-          const res = await fetch(`${API_BASE}/api/v1/account/${currentData.address}/claimable`);
-          claimableData = await res.json();
-        } catch (e) {
-          container.innerHTML = '<div class="error-banner">Failed to load claimable balances</div>';
-          return;
-        }
-      }
-
-      if (!claimableData.claimableBalances || claimableData.claimableBalances.length === 0) {
-        container.innerHTML = '<div class="empty-state">No claimable balances</div>';
-        return;
-      }
-
-      let html = '<div class="tx-list">';
-      claimableData.claimableBalances.forEach((cb) => {
-        const code = cb.asset.code;
-        html += `
-          <div class="claim-row">
-            <div>
-              <div class="claim-asset">${code}</div>
-              <div class="claim-sponsor">from ${shortenAddr(cb.sponsor)}</div>
-            </div>
-            <div style="color: var(--text-muted); font-size: 13px;">
-              ${cb.claimants.length} claimant${cb.claimants.length > 1 ? "s" : ""}
-            </div>
-            <div class="claim-amount">${fmt(parseFloat(cb.amount))} ${code}</div>
-          </div>
-        `;
-      });
-      html += "</div>";
-      container.innerHTML = html;
-    }
-
-    // ── Render NFTs ───────────────────────────────────────────
-    async function renderNfts(container) {
-      if (!nftsData) {
-        container.innerHTML = '<div class="loading"><div class="spinner"></div><div style="color:var(--text-secondary)">Scanning balances and resolving issuer metadata… <br/><span style="font-size:11px">(checking classic assets + Soroban contracts)</span></div></div>';
-        try {
-          // Fire both requests in parallel: SEP-39 classic-asset NFTs and
-          // SEP-50 Soroban-contract NFTs (incl. Meridian Pay).
-          const [classicRes, sorobanRes] = await Promise.all([
-            fetch(`${API_BASE}/api/v1/account/${currentData.address}/nfts`).then((r) => r.json()).catch(() => ({ nfts: [] })),
-            fetch(`${API_BASE}/api/v1/account/${currentData.address}/collectibles`).then((r) => r.json()).catch(() => ({ collections: [] })),
-          ]);
-          nftsData = { classic: classicRes, soroban: sorobanRes };
-        } catch (e) {
-          container.innerHTML = '<div class="error-banner">Failed to load NFTs</div>';
-          return;
-        }
-      }
-
-      const classicNfts = (nftsData.classic && nftsData.classic.nfts) || [];
-      const sorobanCollections = (nftsData.soroban && nftsData.soroban.collections) || [];
-      const sorobanItemCount = sorobanCollections.reduce((sum, c) => sum + c.count, 0);
-      const totalCount = classicNfts.length + sorobanItemCount;
-
-      if (totalCount === 0) {
-        container.innerHTML = `
-          <div class="empty-state">
-            No NFTs detected.
-            <div style="font-size: 12px; margin-top: 6px;">
-              Checked classic Stellar assets (SEP-39) and Soroban smart-contract collections (SEP-50).
-            </div>
-          </div>`;
-        return;
-      }
-
-      let html = "";
-
-      // ── Soroban (SEP-50) collections — group by collection ──
-      for (const col of sorobanCollections) {
-        html += `
-          <div style="margin-top: 8px; margin-bottom: 16px;">
-            <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:12px;">
-              <div>
-                <div style="font-size:16px; font-weight:600; color:var(--text-primary);">${escapeHtml(col.name)}</div>
-                <div style="font-size:11px; color:var(--text-muted); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; margin-top:2px;">
-                  ${escapeHtml(col.symbol)} · ${escapeHtml(shortenAddr(col.address))} · Soroban
-                </div>
-              </div>
-              <div style="font-size:12px; color:var(--text-secondary);">${col.count} item${col.count === 1 ? "" : "s"}</div>
-            </div>
-            <div class="nft-grid">
-              ${col.items.map((item) => {
-                const name = (item.metadata && item.metadata.name) || `#${item.tokenId}`;
-                const image = item.metadata && item.metadata.image;
-                const desc = (item.metadata && item.metadata.description) || "";
-
-                const imageHtml = image
-                  ? `<img class="nft-card-image" src="${escapeHtml(image)}" alt="${escapeHtml(name)}" loading="lazy" onerror="this.outerHTML='<div class=&quot;nft-card-image-fallback&quot;>NFT</div>'">`
-                  : `<div class="nft-card-image-fallback">#${escapeHtml(item.tokenId)}</div>`;
-
-                return `
-                  <div class="nft-card">
-                    ${imageHtml}
-                    <div class="nft-card-body">
-                      <div class="nft-card-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
-                      <div class="nft-card-code">Token #${escapeHtml(item.tokenId)}</div>
-                      ${desc ? `<div class="nft-card-meta" style="display:block; font-size:11px; line-height:1.4; margin-top:6px; color:var(--text-muted);">${escapeHtml(desc.length > 100 ? desc.slice(0, 100) + "…" : desc)}</div>` : ""}
-                    </div>
-                  </div>`;
-              }).join("")}
-            </div>
-          </div>`;
-      }
-
-      // ── Classic SEP-39 NFTs (with confidence heuristic) ──
-      if (classicNfts.length > 0) {
-        html += `
-          <div style="margin-top: 24px; margin-bottom: 12px;">
-            <div style="font-size:16px; font-weight:600; color:var(--text-primary);">Classic Stellar NFTs</div>
-            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">SEP-39 trustline assets with NFT-like properties</div>
-          </div>
-          <div class="nft-grid">
-            ${classicNfts.map((n) => {
-              const name = (n.metadata && n.metadata.name) || n.asset.code;
-              const code = n.asset.code;
-              const image = n.metadata && n.metadata.image;
-              const confidenceClass = n.confidence >= 0.7 ? "high" : n.confidence >= 0.5 ? "med" : "low";
-              const confidenceLabel = n.confidence >= 0.7 ? "Likely" : n.confidence >= 0.5 ? "Probable" : "Maybe";
-
-              const imageHtml = image
-                ? `<img class="nft-card-image" src="${escapeHtml(image)}" alt="${escapeHtml(name)}" loading="lazy" onerror="this.outerHTML='<div class=&quot;nft-card-image-fallback&quot;>'+this.alt.slice(0,2).toUpperCase()+'</div>'">`
-                : `<div class="nft-card-image-fallback">${escapeHtml(code.slice(0, 2).toUpperCase())}</div>`;
-
-              return `
-                <div class="nft-card">
-                  ${imageHtml}
-                  <div class="nft-card-body">
-                    <div class="nft-card-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
-                    <div class="nft-card-code">${escapeHtml(code)} · ${escapeHtml(shortenAddr(n.asset.issuer))}</div>
-                    <div class="nft-card-meta">
-                      <span>${n.asset.domain ? escapeHtml(n.asset.domain) : "no domain"}</span>
-                      <span class="nft-confidence ${confidenceClass}">${confidenceLabel}</span>
-                    </div>
-                  </div>
-                </div>`;
-            }).join("")}
-          </div>`;
-      }
-
-      container.innerHTML = html;
-    }
-
-    // Minimal HTML escaper for untrusted metadata fields (stellar.toml content
-    // is controlled by issuers and can contain anything).
-    function escapeHtml(s) {
-      if (s === null || s === undefined) return "";
-      return String(s)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
-    }
-  </script>
-<footer style="text-align: center; padding: 32px 16px 24px; margin-top: 64px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 13px;">
-  <a href="/terms.html" style="color: var(--text-secondary); text-decoration: none; margin: 0 14px;">Terms</a>
-  <a href="/privacy.html" style="color: var(--text-secondary); text-decoration: none; margin: 0 14px;">Privacy</a>
-  <a href="/security.html" style="color: var(--text-secondary); text-decoration: none; margin: 0 14px;">Security</a>
-</footer></body>
-</html>
+              <div class="chart-stat-value"
