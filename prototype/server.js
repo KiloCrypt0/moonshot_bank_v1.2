@@ -15,6 +15,7 @@ const BlendAdapter = require("./lib/adapters/blend");
 const AquariusAdapter = require("./lib/adapters/aquarius");
 const TemplarAdapter = require("./lib/adapters/templar");
 const snapshotScheduler = require("./lib/snapshot-scheduler");
+const createPublicApiRoutes = require("./lib/public-api-routes");
 const { resolveNfts } = require("./lib/nft-resolver");
 const { resolveSorobanCollectibles } = require("./lib/collectibles-resolver");
 
@@ -1163,6 +1164,9 @@ async function fetchPortfolioForScheduler(address) {
 snapshotScheduler.init(fetchPortfolioForScheduler);
 
 const PORT = process.env.PORT || 4000;
+// Public API + portfolio profiles
+app.use(createPublicApiRoutes(fetchPortfolioForScheduler));
+
 app.listen(PORT, () => {
   console.log(`Stellar Moonshot Bank API running on http://localhost:${PORT}`);
   console.log(`Dashboard: http://localhost:${PORT}`);
