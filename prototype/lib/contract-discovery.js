@@ -172,21 +172,38 @@ async function _probeContract(walletAddress, contractId) {
 async function _resolveHit(walletAddress, hit) {
   let { contractId, rawBalance, decimals, symbol } = hit;
 
-  // Fetch metadata if we don't have it cached
+  // Highest-trust fallback: the token universe. For statically-seeded contracts
+  // (SolvBTC, USDC, etc.) and Soroswap-listed contracts, decimals + symbol are
+  // already known and don't require a Soroban RPC call. This protects against
+  // metadata-fetch failures (rate limits, transient errors) that would
+  // otherwise produce wrong decimals and a misreported balance.
+  if (decimals == null || !symbol) {
+    const universeEntry = tokenUniverse.get(contractId);
+    if (universeEntry) {
+      if (decimals == null && universeEntry.decimals != null) {
+        decimals = universeEntry.decimals;
+      }
+      if (!symbol && universeEntry.symbol) {
+        symbol = universeEntry.symbol;
+      }
+    }
+  }
+
+  // Last-resort: live metadata fetch (slow path; only for contracts we don't
+  // know about statically).
   if (decimals == null || !symbol) {
     try {
       const meta = await getTokenMetadata(contractId);
       if (meta) {
-        decimals = meta.decimals;
-        symbol = meta.symbol;
-        // Update cache with the metadata we learned
+        if (decimals == null) decimals = meta.decimals;
+        if (!symbol) symbol = meta.symbol;
+        // Update cache + universe with anything we learned
         try {
           historyDb.upsertDiscoveredBalance(walletAddress, contractId, {
             balanceRaw: rawBalance.toString(),
             decimals,
             symbol,
           });
-          // Also seed it into the runtime universe so other lookups benefit
           tokenUniverse.add(contractId, { symbol, decimals, source: "discovered" });
         } catch (e) { /* non-fatal */ }
       }
