@@ -4,9 +4,26 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Stellar DeBank</title>
+  <script>
+    // Apply saved theme immediately, before any paint. This avoids a brief
+    // flash of the default theme on page load when the user has chosen the
+    // other one. Wrapped in try/catch because localStorage can throw in
+    // private-browsing or sandboxed contexts; falling back to default-dark
+    // is fine.
+    try {
+      var saved = localStorage.getItem("theme");
+      if (saved === "light" || saved === "dark") {
+        document.documentElement.setAttribute("data-theme", saved);
+      }
+    } catch (e) {}
+  </script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/stellar-freighter-api/2.0.0/index.min.js"></script>
   <style>
-    :root {
+    /* Dark theme (default) and light theme.
+       Both use the same variable NAMES so every existing rule that says
+       `var(--bg-primary)` etc. continues to work — only the values change. */
+    :root,
+    :root[data-theme="dark"] {
       --bg-primary: #0a0e17;
       --bg-secondary: #111827;
       --bg-card: #1a2332;
@@ -24,7 +41,53 @@
       --purple: #a855f7;
       --stellar-blue: #4c6ef5;
       --radius: 12px;
+      /* Shadow tuned for dark backgrounds */
+      --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4);
     }
+
+    :root[data-theme="light"] {
+      --bg-primary: #f7f8fa;       /* page background — warm off-white */
+      --bg-secondary: #ffffff;     /* elevated surface, e.g. main panel */
+      --bg-card: #ffffff;          /* cards stand bright against page */
+      --bg-hover: #eef0f4;         /* subtle hover for cards/buttons */
+      --border: #d8dde5;           /* visible but soft */
+      --text-primary: #0f172a;     /* near-black, easy on eyes */
+      --text-secondary: #475569;
+      --text-muted: #94a3b8;
+      --accent: #4f46e5;           /* slightly darker indigo for contrast */
+      --accent-light: #6366f1;
+      --green: #16a34a;
+      --red: #dc2626;
+      --yellow: #ca8a04;
+      --blue: #2563eb;
+      --purple: #9333ea;
+      --stellar-blue: #3b5fed;
+      --radius: 12px;
+      --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.08);
+    }
+
+    /* The theme-toggle button itself */
+    .theme-toggle {
+      width: 38px;
+      height: 38px;
+      border-radius: 50%;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      color: var(--text-primary);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.15s, transform 0.15s;
+      padding: 0;
+    }
+    .theme-toggle:hover { background: var(--bg-hover); transform: scale(1.05); }
+    .theme-toggle svg { width: 18px; height: 18px; }
+    /* Show only the icon matching the current theme. */
+    :root[data-theme="dark"] .theme-toggle .icon-sun { display: block; }
+    :root[data-theme="dark"] .theme-toggle .icon-moon { display: none; }
+    :root[data-theme="light"] .theme-toggle .icon-sun { display: none; }
+    :root[data-theme="light"] .theme-toggle .icon-moon { display: block; }
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -1124,6 +1187,231 @@
       .token-price { display: none; }
       .stats-grid { grid-template-columns: repeat(2, 1fr); }
     }
+
+    /* ───────────────── Easter egg: Cramer soundboard ─────────────────
+       Triggered by the Konami code (↑↑↓↓←→←→BA). All scoped under .cramer-*
+       prefixes so it can't conflict with anything else in the page. */
+    .cramer-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.85);
+      z-index: 9999;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      animation: cramerFadeIn 0.25s ease-out;
+    }
+    .cramer-overlay.show { display: flex; }
+    @keyframes cramerFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+    .cramer-panel {
+      background: linear-gradient(180deg, #1a1a1a 0%, #0a0a0a 100%);
+      border: 3px solid #FFD700;
+      border-radius: 16px;
+      padding: 32px;
+      max-width: 720px;
+      width: 92vw;
+      box-shadow: 0 0 80px rgba(255, 215, 0, 0.4);
+      animation: cramerSlideIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    @keyframes cramerSlideIn {
+      from { transform: scale(0.6); opacity: 0; }
+      to   { transform: scale(1); opacity: 1; }
+    }
+
+    .cramer-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 2px solid #FFD700;
+    }
+    .cramer-title {
+      font-family: 'Impact', 'Arial Black', sans-serif;
+      font-size: 28px;
+      color: #FFD700;
+      letter-spacing: 2px;
+      text-shadow: 0 0 12px rgba(255, 215, 0, 0.6);
+    }
+    .cramer-subtitle {
+      font-size: 11px;
+      color: #888;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      margin-top: 4px;
+    }
+    .cramer-close {
+      background: transparent;
+      color: #FFD700;
+      border: 2px solid #FFD700;
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 18px;
+      font-weight: bold;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .cramer-close:hover { background: #FFD700; color: #000; }
+
+    .cramer-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
+    }
+    .cramer-btn {
+      padding: 28px 16px;
+      border-radius: 12px;
+      font-family: 'Impact', 'Arial Black', sans-serif;
+      font-size: 22px;
+      letter-spacing: 2px;
+      cursor: pointer;
+      border: none;
+      color: white;
+      text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.5);
+      transition: transform 0.1s, box-shadow 0.2s;
+      box-shadow: 0 6px 0 rgba(0, 0, 0, 0.3);
+    }
+    .cramer-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 0 rgba(0, 0, 0, 0.4); }
+    .cramer-btn:active { transform: translateY(2px); box-shadow: 0 2px 0 rgba(0, 0, 0, 0.3); }
+
+    .cramer-btn.buy    { background: linear-gradient(180deg, #22c55e, #16a34a); }
+    .cramer-btn.sell   { background: linear-gradient(180deg, #ef4444, #dc2626); }
+    .cramer-btn.booyah { background: linear-gradient(180deg, #f97316, #ea580c); }
+    .cramer-btn.pain   { background: linear-gradient(180deg, #7c2d12, #451a03); }
+    .cramer-btn.nothin { background: linear-gradient(180deg, #a855f7, #7e22ce); }
+
+    .cramer-hint {
+      text-align: center;
+      margin-top: 20px;
+      font-size: 11px;
+      color: #555;
+      letter-spacing: 1px;
+    }
+
+    /* When a button is pressed: brief screen flash overlay */
+    .cramer-flash {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 10000;
+      opacity: 0;
+    }
+    .cramer-flash.flash-green { background: #22c55e; animation: cramerFlash 0.4s ease-out; }
+    .cramer-flash.flash-red   { background: #ef4444; animation: cramerFlash 0.4s ease-out; }
+    .cramer-flash.flash-gold  { background: #FFD700; animation: cramerFlash 0.4s ease-out; }
+    @keyframes cramerFlash {
+      0%   { opacity: 0; }
+      30%  { opacity: 0.4; }
+      100% { opacity: 0; }
+    }
+
+    /* Screen shake — applied to body for big moments */
+    @keyframes cramerShake {
+      0%, 100% { transform: translate(0, 0); }
+      10% { transform: translate(-4px, 2px); }
+      20% { transform: translate(3px, -3px); }
+      30% { transform: translate(-2px, 4px); }
+      40% { transform: translate(4px, 2px); }
+      50% { transform: translate(-3px, -2px); }
+      60% { transform: translate(2px, 3px); }
+      70% { transform: translate(-4px, -1px); }
+      80% { transform: translate(3px, 2px); }
+      90% { transform: translate(-1px, -3px); }
+    }
+    body.cramer-shaking { animation: cramerShake 0.5s; }
+
+    /* ───────────────── Price ticker (marquee banner) ─────────────────
+       Sits between header and main content. Items scroll right-to-left in
+       a CSS-only infinite loop. To make the loop seamless we render the
+       full token list TWICE inside the track and translate by -50%; the
+       second copy lines up exactly where the first started, so the user
+       never sees a jump. */
+    .ticker {
+      background: var(--bg-secondary);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      overflow: hidden;
+      position: relative;
+      /* Soft fade on both edges so items don't pop in/out abruptly */
+      -webkit-mask-image: linear-gradient(90deg, transparent, #000 60px, #000 calc(100% - 60px), transparent);
+              mask-image: linear-gradient(90deg, transparent, #000 60px, #000 calc(100% - 60px), transparent);
+    }
+    .ticker-track {
+      display: flex;
+      gap: 28px;
+      padding: 10px 0;
+      width: max-content;
+      animation: tickerScroll 40s linear infinite;
+      will-change: transform;
+    }
+    .ticker:hover .ticker-track { animation-play-state: paused; }
+    @keyframes tickerScroll {
+      from { transform: translateX(0); }
+      to   { transform: translateX(-50%); }
+    }
+
+    .ticker-item {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      padding: 4px 16px;
+      border-right: 1px solid var(--border);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+    .ticker-symbol {
+      font-weight: 600;
+      color: var(--text-primary);
+      letter-spacing: 0.5px;
+    }
+    .ticker-price {
+      color: var(--text-secondary);
+      font-variant-numeric: tabular-nums;
+    }
+    .ticker-change {
+      font-size: 11px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+    .ticker-change.up   { color: var(--green); }
+    .ticker-change.down { color: var(--red); }
+
+    /* Cramer easter-egg items mixed into the marquee. Same shape as a normal
+       ticker-item but bigger, colorful, and clickable. */
+    .ticker-cramer {
+      cursor: pointer;
+      padding: 4px 20px;
+      border-radius: 6px;
+      font-family: 'Impact', 'Arial Black', sans-serif;
+      font-size: 15px;
+      letter-spacing: 2px;
+      color: white;
+      text-shadow: 1px 1px 0 rgba(0,0,0,0.4);
+      border: none;
+      align-self: center;
+      animation: tickerCramerPulse 1.8s ease-in-out infinite;
+      transition: transform 0.1s;
+    }
+    .ticker-cramer:hover { transform: scale(1.08); }
+    .ticker-cramer:active { transform: scale(0.96); }
+    .ticker-cramer.buy  { background: linear-gradient(180deg, #22c55e, #16a34a); }
+    .ticker-cramer.sell { background: linear-gradient(180deg, #ef4444, #dc2626); }
+    @keyframes tickerCramerPulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(255,255,255,0.0); }
+      50%      { box-shadow: 0 0 14px 2px rgba(255,255,255,0.35); }
+    }
+
+    /* Loading placeholder */
+    .ticker-loading {
+      padding: 10px 16px;
+      color: var(--text-muted);
+      font-size: 12px;
+      letter-spacing: 1px;
+      text-align: center;
+    }
   </style>
 </head>
 <body>
@@ -1150,10 +1438,26 @@
         </svg>
         Connect Freighter
       </button>
+      <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle light / dark theme" aria-label="Toggle theme">
+        <!-- Sun icon: shown in dark mode (clicking switches TO light) -->
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="4"></circle>
+          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path>
+        </svg>
+        <!-- Moon icon: shown in light mode (clicking switches TO dark) -->
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+        </svg>
+      </button>
       <div class="network-badge">
         <div class="network-dot"></div>Mainnet
       </div>
     </div>
+  </div>
+
+  <!-- Live price ticker. Populated by initTicker() on page load. -->
+  <div class="ticker" id="priceTicker">
+    <div class="ticker-loading">Loading prices…</div>
   </div>
 
   <div class="main" id="app">
@@ -1223,6 +1527,135 @@
     }
 
     // Network is always mainnet (read-only protocol, no need for testnet)
+
+    // ── Theme Toggle ──────────────────────────────────────────
+    // Reads the current theme from <html data-theme="...">, flips it, applies
+    // the new value, and persists to localStorage so the choice sticks across
+    // sessions. The matching CSS already swaps the icon (sun ↔ moon) and the
+    // palette via CSS variables, so this function doesn't need to touch any
+    // other element. localStorage writes are wrapped in try/catch for the
+    // same reason as the early loader above.
+    function toggleTheme() {
+      const html = document.documentElement;
+      const current = html.getAttribute("data-theme") || "dark";
+      const next = current === "dark" ? "light" : "dark";
+      html.setAttribute("data-theme", next);
+      try { localStorage.setItem("theme", next); } catch (e) {}
+    }
+
+    // ── Price Ticker (marquee banner) ─────────────────────────
+    // Fetches /api/v1/prices/ticker every 30s and renders an infinitely-
+    // scrolling row of token prices. The CSS does the actual scrolling — JS
+    // just lays out the items. To make the loop seamless we render the full
+    // item list TWICE inside the track and the CSS translates by -50%.
+    //
+    // Easter egg: BUY/SELL buttons get sprinkled into random positions in
+    // the sequence. They look like Cramer-style hype buttons. Clicking one
+    // triggers a triple-shout via Web Speech API ("BUY BUY BUY" / "SELL
+    // SELL SELL") plus a screen flash from the existing easter-egg system.
+
+    function formatTickerPrice(price) {
+      if (price === null || price === undefined) return "—";
+      // Different display precision based on magnitude — same approach the
+      // rest of the dashboard uses, but inlined here to avoid touching the
+      // global fmt() helper.
+      if (price >= 1000) return "$" + price.toFixed(2);
+      if (price >= 1) return "$" + price.toFixed(4);
+      if (price >= 0.01) return "$" + price.toFixed(5);
+      return "$" + price.toFixed(8);
+    }
+
+    function buildTickerItemHtml(t) {
+      const priceStr = formatTickerPrice(t.price);
+      let changeHtml = "";
+      if (t.change24h !== null && t.change24h !== undefined) {
+        const cls = t.change24h >= 0 ? "up" : "down";
+        const sign = t.change24h >= 0 ? "+" : "";
+        changeHtml = `<span class="ticker-change ${cls}">${sign}${t.change24h.toFixed(2)}%</span>`;
+      }
+      return `
+        <div class="ticker-item">
+          <span class="ticker-symbol">${escapeHtml(t.symbol)}</span>
+          <span class="ticker-price">${priceStr}</span>
+          ${changeHtml}
+        </div>`;
+    }
+
+    // Returns the ticker HTML as a single string. Just prices, no easter
+    // eggs — the BUY/SELL audio joke now lives behind the Konami code.
+    function buildTickerSequence(tokens) {
+      return tokens.map(buildTickerItemHtml).join("");
+    }
+
+    async function refreshTicker() {
+      const mount = document.getElementById("priceTicker");
+      if (!mount) return;
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/prices/ticker`);
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const data = await res.json();
+        const tokens = data.tokens || [];
+        if (tokens.length === 0) {
+          mount.innerHTML = '<div class="ticker-loading">No prices available</div>';
+          return;
+        }
+        const sequence = buildTickerSequence(tokens);
+        // Render the sequence TWICE — the CSS keyframe translates by -50%
+        // so the second copy lines up exactly where the first started,
+        // making the loop seamless.
+        mount.innerHTML = `<div class="ticker-track">${sequence}${sequence}</div>`;
+      } catch (e) {
+        // On failure, leave whatever was there (last successful render) or
+        // show a quiet error if it was the very first attempt.
+        if (mount.querySelector(".ticker-track")) return; // keep stale render
+        mount.innerHTML = '<div class="ticker-loading">Price feed offline</div>';
+      }
+    }
+
+    // Triple-shout for the BUY/SELL ticker buttons. Speaks the word three
+    // times in sequence ("BUY. BUY. BUY.") via Web Speech API, with the same
+    // pitch/rate tuning as the main easter-egg soundboard. Reuses the screen-
+    // flash element from the Cramer modal for the visual punch.
+    function cramerTripleShout(word) {
+      const upper = word.toUpperCase();
+      const flashColor = upper === "BUY" ? "green" : "red";
+
+      // Visual flash
+      const flash = document.getElementById("cramerFlash");
+      if (flash) {
+        flash.className = "cramer-flash flash-" + flashColor;
+        void flash.offsetWidth; // restart animation
+      }
+
+      // Audio: bark the single word three times with a real gap between
+      // each. Some TTS engines smush back-to-back utterances together when
+      // the rate is high, so we space them out manually with setTimeout
+      // rather than calling speak() three times in a tight loop.
+      try {
+        window.speechSynthesis.cancel();
+        const v = (typeof pickCramerVoice === "function") ? pickCramerVoice() : null;
+        const sayOnce = () => {
+          const u = new SpeechSynthesisUtterance(upper);
+          if (v) u.voice = v;
+          u.rate = 1.5;    // brisk bark but with clear syllable
+          u.pitch = 0.9;
+          u.volume = 1.0;
+          window.speechSynthesis.speak(u);
+        };
+        // First immediately, then two more at ~320ms intervals. Tweak the
+        // delay to taste — too short and they blur, too long and the joke
+        // loses energy.
+        sayOnce();
+        setTimeout(sayOnce, 320);
+        setTimeout(sayOnce, 640);
+      } catch (e) {
+        // TTS unavailable — visual fires regardless
+      }
+    }
+
+    // Kick off the ticker on page load and refresh every 30s.
+    refreshTicker();
+    setInterval(refreshTicker, 30000);
 
     // ── Freighter Wallet ──────────────────────────────────────
     async function connectFreighter() {
@@ -2756,6 +3189,118 @@
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#39;");
     }
+
+    // ── Easter egg: Cramer soundboard (Konami code) ──────────────────
+    // Listens for ↑↑↓↓←→←→BA at the document level. Doesn't fire if the
+    // user is typing in an input or textarea (so they can still type the
+    // letter "b" or "a" in the address bar). Uses the browser's built-in
+    // Web Speech API for vocals — no audio files, no copyright issues.
+    const KONAMI = ["ArrowUp","ArrowUp","ArrowDown","ArrowDown","ArrowLeft","ArrowRight","ArrowLeft","ArrowRight","b","a"];
+    let konamiBuf = [];
+
+    document.addEventListener("keydown", (e) => {
+      // Don't capture keys while the user is typing into a form field
+      const t = e.target;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+
+      konamiBuf.push(e.key);
+      // Keep buffer at the length of the code
+      if (konamiBuf.length > KONAMI.length) konamiBuf.shift();
+      if (konamiBuf.length === KONAMI.length && konamiBuf.every((k, i) => k === KONAMI[i])) {
+        konamiBuf = [];
+        // Random hot take: 50/50 buy or sell, triple-shouted with screen flash.
+        const word = Math.random() < 0.5 ? "BUY" : "SELL";
+        cramerTripleShout(word);
+      }
+
+      // Escape closes the modal
+      if (e.key === "Escape") hideCramer();
+    });
+
+    function showCramer() {
+      document.getElementById("cramerOverlay").classList.add("show");
+      // Pre-warm speech synthesis — first call after page load can be silent
+      // on some browsers until the voices list loads. Speaking an empty string
+      // is a no-op but it nudges the synth awake.
+      try { window.speechSynthesis.getVoices(); } catch (e) {}
+    }
+
+    function hideCramer() {
+      document.getElementById("cramerOverlay").classList.remove("show");
+      try { window.speechSynthesis.cancel(); } catch (e) {}
+    }
+
+    // Pick the deepest, most male-sounding voice we can find. Falls back to
+    // the default if nothing matches. Cached after first lookup.
+    let cramerVoice = null;
+    function pickCramerVoice() {
+      if (cramerVoice) return cramerVoice;
+      try {
+        const voices = window.speechSynthesis.getVoices();
+        // Preference order: Daniel (en-GB male), Alex (macOS classic), Fred,
+        // anything with "male" in name, anything en-US.
+        const preferences = [/daniel/i, /alex/i, /fred/i, /male/i, /en[-_]us/i, /en[-_]gb/i];
+        for (const re of preferences) {
+          const match = voices.find((v) => re.test(v.name) || re.test(v.lang));
+          if (match) { cramerVoice = match; return cramerVoice; }
+        }
+        cramerVoice = voices[0] || null;
+      } catch (e) {}
+      return cramerVoice;
+    }
+
+    function cramerShout(phrase, flashColor, shake) {
+      // Visual: screen flash + (optional) shake
+      const flash = document.getElementById("cramerFlash");
+      flash.className = "cramer-flash flash-" + flashColor;
+      // Restart the animation by forcing a reflow before re-adding class
+      void flash.offsetWidth;
+
+      if (shake) {
+        document.body.classList.remove("cramer-shaking");
+        void document.body.offsetWidth;
+        document.body.classList.add("cramer-shaking");
+        setTimeout(() => document.body.classList.remove("cramer-shaking"), 600);
+      }
+
+      // Audio: speak the phrase. Cancel any in-flight speech so rapid
+      // clicks don't queue up.
+      try {
+        window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(phrase);
+        const v = pickCramerVoice();
+        if (v) u.voice = v;
+        u.rate = 1.4;    // brisk, hyped delivery
+        u.pitch = 0.9;
+        u.volume = 1.0;
+        window.speechSynthesis.speak(u);
+      } catch (e) {
+        // If TTS isn't available the visual still fires — fine.
+      }
+    }
   </script>
+
+  <!-- Easter egg: Cramer soundboard. Hidden by default; revealed by Konami code. -->
+  <div class="cramer-overlay" id="cramerOverlay" onclick="if(event.target===this)hideCramer()">
+    <div class="cramer-panel">
+      <div class="cramer-header">
+        <div>
+          <div class="cramer-title">📈 MAD MONEY 📉</div>
+          <div class="cramer-subtitle">Press the buttons. Trust the buttons.</div>
+        </div>
+        <button class="cramer-close" onclick="hideCramer()" aria-label="Close">×</button>
+      </div>
+      <div class="cramer-grid">
+        <button class="cramer-btn buy"    onclick="cramerShout('BUY BUY BUY','green',false)">BUY BUY BUY</button>
+        <button class="cramer-btn sell"   onclick="cramerShout('SELL SELL SELL','red',true)">SELL SELL SELL</button>
+        <button class="cramer-btn booyah" onclick="cramerShout('BOOYAH','gold',true)">BOOYAH!</button>
+        <button class="cramer-btn pain"   onclick="cramerShout('HOUSE OF PAIN','red',true)">HOUSE OF PAIN</button>
+        <button class="cramer-btn nothin" onclick="cramerShout('They know NOTHING. NOTHING!','gold',false)">THEY KNOW NOTHING</button>
+      </div>
+      <div class="cramer-hint">PRESS <kbd>ESC</kbd> TO CLOSE · NOT FINANCIAL ADVICE</div>
+    </div>
+  </div>
+  <div class="cramer-flash" id="cramerFlash"></div>
+
 </body>
 </html>

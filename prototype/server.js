@@ -15,6 +15,7 @@ const TemplarAdapter = require("./lib/adapters/templar");
 const snapshotScheduler = require("./lib/snapshot-scheduler");
 const { resolveNfts } = require("./lib/nft-resolver");
 const { resolveSorobanCollectibles } = require("./lib/collectibles-resolver");
+const { getTickerPrices } = require("./lib/price-ticker");
 
 const app = express();
 app.use(cors());
@@ -410,6 +411,17 @@ app.get("/api/v1/account/:address/collectibles", async (req, res) => {
   } catch (e) {
     console.error("Collectibles fetch error:", e.message);
     res.status(502).json({ error: "Failed to fetch collectibles", detail: e.message });
+  }
+});
+
+// Live price ticker — feeds the marquee banner. 30s server-side cache.
+app.get("/api/v1/prices/ticker", async (_req, res) => {
+  try {
+    const result = await getTickerPrices();
+    res.json(result);
+  } catch (e) {
+    console.error("Ticker prices fetch error:", e.message);
+    res.status(502).json({ error: "Failed to fetch prices", detail: e.message });
   }
 });
 
