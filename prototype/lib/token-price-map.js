@@ -218,10 +218,19 @@ function stats() {
   };
 }
 
+/**
+ * Enumerate all currently-known Soroban contract IDs. Used by token-universe
+ * to assemble its candidate set without re-encoding the seed list.
+ */
+function knownSorobanContracts() {
+  return Array.from(sorobanMap.keys());
+}
+
 module.exports = {
   lookupSoroban,
   lookupClassic,
   refreshFromCoinGecko,
   _maybeRefresh,
+  knownSorobanContracts,
   stats,
 };
