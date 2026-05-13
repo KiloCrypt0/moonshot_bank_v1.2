@@ -1266,17 +1266,28 @@
     .star { position:absolute; border-radius:50%; background:white; animation:twinkle var(--d,2s) infinite; }
 
     /* ── Whale Leaderboard ─────────────────────────────────── */
-    .whale-section {
+    .whale-columns {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 32px;
       margin-top: 48px;
-      max-width: 600px;
+      max-width: 1100px;
       margin-left: auto;
       margin-right: auto;
     }
 
+    @media (max-width: 900px) {
+      .whale-columns { grid-template-columns: 1fr; }
+    }
+
+    .whale-section {
+      min-width: 0;
+    }
+
     .whale-section-title {
-      font-size: 20px;
+      font-size: 18px;
       font-weight: 700;
-      margin-bottom: 16px;
+      margin-bottom: 14px;
       color: var(--text-primary);
     }
 
@@ -1327,30 +1338,6 @@
       text-align: right;
       font-weight: 600;
       color: var(--text-primary);
-    }
-
-    /* ── Featured NFT ──────────────────────────────────────── */
-    .featured-nft-section {
-      margin-top: 24px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .featured-nft-title {
-      font-size: 15px;
-      font-weight: 600;
-      color: var(--text-secondary);
-    }
-
-    #featured-nft {
-      width: 120px;
-      height: 120px;
-      border-radius: 12px;
-      object-fit: cover;
-      border: 1px solid var(--border);
-      background: var(--bg-card);
     }
 
     /* ── Responsive ────────────────────────────────────────── */
@@ -1412,6 +1399,8 @@
     <span class="star" style="--d:2.2s;width:3px;height:3px;top:88%;left:63%;"></span>
     <span class="star" style="--d:1.6s;width:2px;height:2px;top:83%;left:77%;"></span>
     <span class="star" style="--d:3.0s;width:2px;height:2px;top:90%;left:92%;"></span>
+    <img src="https://bronze-adjacent-barnacle-907.mypinata.cloud/ipfs/bafybeigdv2ccs3bighhgvqj65sgi6bz6qruz4r5bqxpwovem5m5t7xcifi/M25_63.jpg" alt="" style="position:absolute;top:30%;left:8%;transform:translateY(-50%);width:420px;max-width:38vw;opacity:0.20;pointer-events:none;mix-blend-mode:screen;-webkit-mask-image:radial-gradient(ellipse at center,black 30%,transparent 75%);mask-image:radial-gradient(ellipse at center,black 30%,transparent 75%);" />
+    <img src="https://bronze-adjacent-barnacle-907.mypinata.cloud/ipfs/bafybeigdv2ccs3bighhgvqj65sgi6bz6qruz4r5bqxpwovem5m5t7xcifi/M25_15.png" alt="" style="position:absolute;top:30%;right:8%;transform:translateY(-50%);width:420px;max-width:38vw;opacity:0.20;pointer-events:none;mix-blend-mode:screen;-webkit-mask-image:radial-gradient(ellipse at center,black 30%,transparent 75%);mask-image:radial-gradient(ellipse at center,black 30%,transparent 75%);" />
   </div>
 
   <div class="header">
@@ -1449,13 +1438,6 @@
         Stellar Moonshot Bank
       </h1>
 
-      <div style="margin: 16px auto 24px; display:flex; justify-content:center;">
-        <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:16px; padding:12px; display:inline-flex; flex-direction:column; align-items:center; gap:8px; box-shadow:0 8px 32px rgba(0,0,0,0.4);">
-          <img src="https://bronze-adjacent-barnacle-907.mypinata.cloud/ipfs/bafybeigdv2ccs3bighhgvqj65sgi6bz6qruz4r5bqxpwovem5m5t7xcifi/M25_63.jpg" alt="Featured NFT" style="width:160px;height:160px;border-radius:10px;object-fit:cover;display:block;" />
-          <span style="font-size:11px;color:var(--text-muted);letter-spacing:0.5px;">✦ Featured NFT</span>
-        </div>
-      </div>
-
       <p>Full portfolio visibility — track multiple wallets, Soroban DeFi, LP positions, and portfolio value over time.</p>
 
       <div style="display: flex; gap: 16px; justify-content: center; margin-bottom: 32px; flex-wrap: wrap;">
@@ -1473,26 +1455,44 @@
       </div>
 
 
-      <div class="whale-section">
-        <div class="whale-section-title">🐋🪐 Top XLM Whales</div>
-        <table class="whale-table" id="whaleTable">
-          <thead>
-            <tr>
-              <th class="whale-rank">#</th>
-              <th>Address</th>
-              <th style="text-align:right">XLM Balance</th>
-              <th style="text-align:right">Assets</th>
-            </tr>
-          </thead>
-          <tbody id="whaleTableBody">
-            <tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:20px;">Loading whales...</td></tr>
-          </tbody>
-        </table>
+      <div class="whale-columns">
+        <!-- Left: XLM Whales -->
+        <div class="whale-section">
+          <div class="whale-section-title">🐋 Top XLM Whales</div>
+          <table class="whale-table" id="whaleTable">
+            <thead>
+              <tr>
+                <th class="whale-rank">#</th>
+                <th>Address</th>
+                <th style="text-align:right">XLM Balance</th>
+                <th style="text-align:right">Assets</th>
+              </tr>
+            </thead>
+            <tbody id="whaleTableBody">
+              <tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:20px;">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Right: Portfolio Whales -->
+        <div class="whale-section">
+          <div class="whale-section-title">💼 Top Portfolio Whales</div>
+          <table class="whale-table" id="portfolioWhaleTable">
+            <thead>
+              <tr>
+                <th class="whale-rank">#</th>
+                <th>Address</th>
+                <th style="text-align:right">USDC Value</th>
+                <th style="text-align:right">Assets</th>
+              </tr>
+            </thead>
+            <tbody id="portfolioWhaleTableBody">
+              <tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:20px;">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      <div style="margin-top:32px;text-align:center;">
-        <img src="/moonshot-mascot.png" alt="Moonshot mascot" style="width:480px;max-width:90%;border-radius:20px;opacity:0.75;" />
-      </div>
 
     </div>
   </div>
@@ -1684,6 +1684,37 @@
       }
     }
 
+    // ── Load Portfolio Whale Leaderboard ─────────────────────
+    async function loadPortfolioWhales() {
+      const tbody = document.getElementById("portfolioWhaleTableBody");
+      if (!tbody) return;
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/portfolio-whales`);
+        if (!res.ok) throw new Error("Failed to fetch");
+        const data = await res.json();
+        const whales = data.whales || [];
+        if (whales.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:20px;">No data available</td></tr>';
+          return;
+        }
+        tbody.innerHTML = whales.map((w, i) => {
+          const shortAddr = w.address ? w.address.slice(0, 6) + "..." + w.address.slice(-4) : "—";
+          const usdVal = w.totalUSD >= 1_000_000
+            ? "$" + (w.totalUSD / 1_000_000).toLocaleString("en-US", { maximumFractionDigits: 1 }) + "M"
+            : "$" + Math.round(w.totalUSD).toLocaleString("en-US");
+          const assets = w.assetCount != null ? w.assetCount : "—";
+          return `<tr onclick="lookUpWhale('${w.address}')">
+            <td class="whale-rank">#${i + 1}</td>
+            <td class="whale-address"><a href="#" onclick="event.preventDefault()">${shortAddr}</a></td>
+            <td class="whale-balance">${usdVal}</td>
+            <td class="whale-balance">${assets}</td>
+          </tr>`;
+        }).join("");
+      } catch (e) {
+        if (tbody) tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--red); padding:20px;">Failed to load</td></tr>';
+      }
+    }
+
     // Auto-detect Freighter and auto-load portfolio on page load
     window.addEventListener("load", () => {
       setTimeout(async () => {
@@ -1692,8 +1723,9 @@
           console.log("Freighter wallet detected");
         }
 
-        // Load whale leaderboard on welcome page
+        // Load whale leaderboards on welcome page
         loadWhales();
+        loadPortfolioWhales();
       }, 500);
     });
 
