@@ -7,12 +7,15 @@ const path = require("path");
 // Soroban integration modules
 const historyDb = require("./lib/history-db");
 const { resolveSorobanTokens, resolveCustomToken, getRegistry } = require("./lib/token-resolver");
+const { discoverSorobanTokens } = require("./lib/contract-discovery");
 const SushiSwapV3Adapter = require("./lib/adapters/sushiswap-v3");
 const SolvProtocolAdapter = require("./lib/adapters/solv-protocol");
 const BlendAdapter = require("./lib/adapters/blend");
 const AquariusAdapter = require("./lib/adapters/aquarius");
 const TemplarAdapter = require("./lib/adapters/templar");
 const snapshotScheduler = require("./lib/snapshot-scheduler");
+const { resolveNfts } = require("./lib/nft-resolver");
+const { resolveSorobanCollectibles } = require("./lib/collectibles-resolver");
 
 const app = express();
 app.use(cors());
@@ -217,6 +220,20 @@ app.get("/api/v1/account/:address", async (req, res) => {
       console.error("Soroban token resolution error:", e.message);
     }
 
+    // ── Auto-discovered Soroban tokens (not in the static registry) ─────────
+    // Scans the wallet's invoke_host_function history for SEP-41 token
+    // contracts and queries balances. Cached per address (5 min default).
+    let discoveredTokens = [];
+    try {
+      discoveredTokens = await discoverSorobanTokens(address);
+      for (const dt of discoveredTokens) {
+        totalValueUSD += dt.valueUSD || 0;
+        balances.push(dt);
+      }
+    } catch (e) {
+      console.error("Soroban token discovery error:", e.message);
+    }
+
     // ── DeFi positions (SushiSwap V3, Solv vaults, etc.) ─────────────────
     const defiPositions = [];
     for (const adapter of PROTOCOL_ADAPTERS) {
@@ -248,24 +265,11 @@ app.get("/api/v1/account/:address", async (req, res) => {
         name: a.name,
         type: a.type,
       })),
-      sorobanTokenCount: sorobanTokens.length,
+      sorobanTokenCount: sorobanTokens.length + discoveredTokens.length,
       subentryCount: account.subentry_count,
       lastModifiedLedger: account.last_modified_ledger,
-      isTracked: historyDb.isTracked(address),
-      snapshotCount: historyDb.getSnapshotCount(address),
       lastUpdated: new Date().toISOString(),
     };
-
-    // Auto-record a snapshot (rate-limited to once per 5 minutes per address)
-    try {
-      const latest = historyDb.getLatestSnapshot(address, "mainnet");
-      const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-      if (!latest || latest.snapshot_at < fiveMinAgo) {
-        historyDb.recordSnapshot(responseData, "mainnet");
-      }
-    } catch (e) {
-      console.error("Snapshot recording error:", e.message);
-    }
 
     res.json(responseData);
   } catch (e) {
@@ -371,6 +375,43 @@ app.get("/api/v1/account/:address/claimable", async (req, res) => {
   } catch (e) {
     console.error("Claimable balance error:", e.message);
     res.status(500).json({ error: "Failed to fetch claimable balances" });
+  }
+});
+
+// NFT holdings — classic Stellar assets that look like NFTs, with SEP-1/SEP-39
+// metadata resolved from the issuer's stellar.toml where available.
+app.get("/api/v1/account/:address/nfts", async (req, res) => {
+  try {
+    const { address } = req.params;
+    const h = getHorizon();
+    const account = await h.loadAccount(address);
+
+    const nfts = await resolveNfts(h, account.balances);
+    res.json({
+      address,
+      count: nfts.length,
+      nfts,
+      // Surface the threshold so a future UI toggle can show "maybe" entries
+      confidenceCutoff: 0.35,
+    });
+  } catch (e) {
+    console.error("NFT fetch error:", e.message);
+    res.status(500).json({ error: "Failed to fetch NFTs" });
+  }
+});
+
+// Soroban contract NFTs (SEP-50, including Meridian Pay collections).
+// Proxies SDF's official Freighter backend rather than reimplementing Soroban
+// RPC token enumeration. See lib/collectibles-resolver.js for the full
+// rationale and source-code references.
+app.get("/api/v1/account/:address/collectibles", async (req, res) => {
+  try {
+    const { address } = req.params;
+    const result = await resolveSorobanCollectibles(address);
+    res.json({ address, ...result });
+  } catch (e) {
+    console.error("Collectibles fetch error:", e.message);
+    res.status(502).json({ error: "Failed to fetch collectibles", detail: e.message });
   }
 });
 
@@ -559,6 +600,52 @@ app.get("/api/v1/account/:address/token-history/:assetCode", (req, res) => {
   } catch (e) {
     console.error("Token history error:", e.message);
     res.status(500).json({ error: "Failed to fetch token history" });
+  }
+});
+
+// Get snapshot closest to a specific date/time
+app.get("/api/v1/account/:address/snapshot-at", (req, res) => {
+  try {
+    const { address } = req.params;
+    const { date } = req.query; // ISO string, e.g. "2026-05-10T14:00:00"
+
+    if (!date) {
+      return res.status(400).json({ error: "Missing ?date= parameter (ISO timestamp)" });
+    }
+
+    const snapshot = historyDb.getSnapshotAtDate(address, date, "mainnet");
+
+    if (!snapshot) {
+      return res.json({
+        address,
+        requestedDate: date,
+        found: false,
+        message: "No snapshots found for this wallet. Snapshots are recorded after you add the wallet.",
+      });
+    }
+
+    res.json({
+      address,
+      requestedDate: date,
+      found: true,
+      snapshotDate: snapshot.snapshot_at,
+      totalValueUSD: snapshot.total_value_usd,
+      xlmBalance: snapshot.xlm_balance,
+      xlmPriceUSD: snapshot.xlm_price_usd,
+      tokenCount: snapshot.token_count,
+      defiPositionCount: snapshot.defi_position_count,
+      tokens: snapshot.tokens.map((t) => ({
+        asset: t.asset_code,
+        issuer: t.asset_issuer,
+        contractId: t.contract_id,
+        balance: t.balance,
+        valueUSD: t.value_usd,
+        priceUSD: t.price_usd,
+      })),
+    });
+  } catch (e) {
+    console.error("Snapshot-at error:", e.message);
+    res.status(500).json({ error: "Failed to fetch snapshot" });
   }
 });
 
@@ -904,6 +991,55 @@ app.post("/api/v1/history/downsample", (req, res) => {
   }
 });
 
+// Top XLM whales leaderboard
+const EXCLUDED_WHALES = new Set([
+  "GALAXYVOIDAOPZTDLHILAJQKCVVFMD4IKLXLSZV5YHO7VY74IWZILUTO", // burned
+  // SDF mandate addresses
+  "GB6NVEN5HSUBKMYCE5ZOWSK5K23TBWRUQLZY3KNMXUZ3AQ2ESC4MY4AQ",
+  "GATL3ETTZ3XDGFXX2ELPIKCZL7S5D2HY3VK4T7LRPD6DW5JOLAEZSZBA",
+  "GAKGC35HMNB7A3Q2V5SQU6VJC2JFTZB6I7ZW77SJSMRCOX2ZFBGJOCHH",
+  "GAPV2C4BTHXPL2IVYDXJ5PUU7Q3LAXU7OAQDP7KVYHLCNM2JTAJNOQQI",
+  "GCVJDBALC2RQFLD2HYGQGWNFZBCOD2CPOTN3LE7FWRZ44H2WRAVZLFCU",
+  "GC3ITNZSVVPOWZ5BU7S64XKNI5VPTRSBEXXLS67V4K6LEUETWBMTE7IH",
+  "GBEVKAYIPWC5AQT6D4N7FC3XGKRRBMPCAMTO3QZWMHHACLHTMAHAM2TP",
+  "GDUY7J7A33TQWOSOQGDO776GGLM3UQERL4J3SPT56F6YS4ID7MLDERI4",
+  "GCPWKVQNLDPD4RNP5CAXME4BEDTKSSYRR4MMEL4KG65NEGCOGNJW7QI2",
+  "GDKIJJIKXLOM2NRMPNQZUUYK24ZPVFC6426GZAEP3KUK6KEJLACCWNMX",
+  "GDWXQOTIIDO2EUK4DIGIBLEHLME2IAJRNU6JDFS5B2ZTND65P7J36WQZ",
+  "GAMGGUQKKJ637ILVDOSCT5X7HYSZDUPGXSUW67B2UKMG2HEN5TPWN3LQ",
+  "GANII5Y2LABEBK74NWNKS4NREX2T52YTBGQDRVKVBFRIIF5VE4ORYOVY",
+  "GBFZPAHO24P7ZVZCMI5SXZR53UYD325OWSSWWHHVLBNN56LU5YZJJFNP",
+]);
+
+app.get("/api/v1/whales", async (req, res) => {
+  try {
+    // Fetch extra to have enough after filtering
+    const response = await fetch("https://api.stellar.expert/explorer/public/asset/XLM/holders?order=desc&limit=40");
+    const data = await response.json();
+    const records = data._embedded?.records || [];
+
+    const filtered = records
+      .filter(a => !EXCLUDED_WHALES.has(a.address))
+      .slice(0, 10);
+
+    const h = getHorizon();
+    const whales = await Promise.all(filtered.map(async (a) => {
+      const xlmBalance = Math.round(parseInt(a.balance) / 10_000_000);
+      let assetCount = null;
+      try {
+        const account = await h.loadAccount(a.address);
+        assetCount = account.balances.length; // includes native XLM + all trustlines
+      } catch (e) { /* leave null if account can't be loaded */ }
+      return { address: a.address, balance: xlmBalance, assetCount };
+    }));
+
+    res.json({ whales });
+  } catch (e) {
+    console.error("Whales error:", e.message);
+    res.status(500).json({ error: "Failed to fetch whales" });
+  }
+});
+
 // Health check
 app.get("/api/health", (req, res) => {
   res.json({
@@ -988,6 +1124,15 @@ async function fetchPortfolioForScheduler(address) {
     }
   } catch (e) { /* ignore for scheduler */ }
 
+  // Auto-discovered Soroban tokens (cached, so usually a no-op in the scheduler loop)
+  try {
+    const discoveredTokens = await discoverSorobanTokens(address);
+    for (const dt of discoveredTokens) {
+      totalValueUSD += dt.valueUSD || 0;
+      balances.push(dt);
+    }
+  } catch (e) { /* ignore for scheduler */ }
+
   // DeFi positions
   const defiPositions = [];
   for (const adapter of PROTOCOL_ADAPTERS) {
@@ -1017,7 +1162,7 @@ snapshotScheduler.init(fetchPortfolioForScheduler);
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
-  console.log(`Stellar DeBank API running on http://localhost:${PORT}`);
+  console.log(`Stellar Moonshot Bank API running on http://localhost:${PORT}`);
   console.log(`Dashboard: http://localhost:${PORT}`);
 
   // Start background snapshot scheduler
