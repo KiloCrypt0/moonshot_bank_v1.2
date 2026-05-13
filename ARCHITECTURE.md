@@ -1,8 +1,8 @@
-# Stellar DeBank — Technical Architecture Spec
+# Stellar Moonshot Bank — Technical Architecture Spec
 
 ## Overview
 
-Stellar DeBank is a standalone portfolio tracking protocol for the Stellar network, providing comprehensive visibility into wallet holdings across all asset types: native XLM, trustline tokens, SDEX positions, liquidity pool shares, Soroban DeFi positions, claimable balances, and NFTs.
+Stellar Moonshot Bank is a standalone portfolio tracking protocol for the Stellar network, providing comprehensive visibility into wallet holdings across all asset types: native XLM, trustline tokens, SDEX positions, liquidity pool shares, Soroban DeFi positions, claimable balances, and NFTs.
 
 ## System Architecture
 

@@ -7,12 +7,15 @@ const path = require("path");
 // Soroban integration modules
 const historyDb = require("./lib/history-db");
 const { resolveSorobanTokens, resolveCustomToken, getRegistry } = require("./lib/token-resolver");
+const { discoverSorobanTokens } = require("./lib/contract-discovery");
 const SushiSwapV3Adapter = require("./lib/adapters/sushiswap-v3");
 const SolvProtocolAdapter = require("./lib/adapters/solv-protocol");
 const BlendAdapter = require("./lib/adapters/blend");
 const AquariusAdapter = require("./lib/adapters/aquarius");
 const TemplarAdapter = require("./lib/adapters/templar");
 const snapshotScheduler = require("./lib/snapshot-scheduler");
+const { resolveNfts } = require("./lib/nft-resolver");
+const { resolveSorobanCollectibles } = require("./lib/collectibles-resolver");
 
 const app = express();
 app.use(cors());
@@ -217,6 +220,20 @@ app.get("/api/v1/account/:address", async (req, res) => {
       console.error("Soroban token resolution error:", e.message);
     }
 
+    // ── Auto-discovered Soroban tokens (not in the static registry) ─────────
+    // Scans the wallet's invoke_host_function history for SEP-41 token
+    // contracts and queries balances. Cached per address (5 min default).
+    let discoveredTokens = [];
+    try {
+      discoveredTokens = await discoverSorobanTokens(address);
+      for (const dt of discoveredTokens) {
+        totalValueUSD += dt.valueUSD || 0;
+        balances.push(dt);
+      }
+    } catch (e) {
+      console.error("Soroban token discovery error:", e.message);
+    }
+
     // ── DeFi positions (SushiSwap V3, Solv vaults, etc.) ─────────────────
     const defiPositions = [];
     for (const adapter of PROTOCOL_ADAPTERS) {
@@ -248,24 +265,11 @@ app.get("/api/v1/account/:address", async (req, res) => {
         name: a.name,
         type: a.type,
       })),
-      sorobanTokenCount: sorobanTokens.length,
+      sorobanTokenCount: sorobanTokens.length + discoveredTokens.length,
       subentryCount: account.subentry_count,
       lastModifiedLedger: account.last_modified_ledger,
-      isTracked: historyDb.isTracked(address),
-      snapshotCount: historyDb.getSnapshotCount(address),
       lastUpdated: new Date().toISOString(),
     };
-
-    // Auto-record a snapshot (rate-limited to once per 5 minutes per address)
-    try {
-      const latest = historyDb.getLatestSnapshot(address, "mainnet");
-      const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-      if (!latest || latest.snapshot_at < fiveMinAgo) {
-        historyDb.recordSnapshot(responseData, "mainnet");
-      }
-    } catch (e) {
-      console.error("Snapshot recording error:", e.message);
-    }
 
     res.json(responseData);
   } catch (e) {
@@ -371,6 +375,43 @@ app.get("/api/v1/account/:address/claimable", async (req, res) => {
   } catch (e) {
     console.error("Claimable balance error:", e.message);
     res.status(500).json({ error: "Failed to fetch claimable balances" });
+  }
+});
+
+// NFT holdings — classic Stellar assets that look like NFTs, with SEP-1/SEP-39
+// metadata resolved from the issuer's stellar.toml where available.
+app.get("/api/v1/account/:address/nfts", async (req, res) => {
+  try {
+    const { address } = req.params;
+    const h = getHorizon();
+    const account = await h.loadAccount(address);
+
+    const nfts = await resolveNfts(h, account.balances);
+    res.json({
+      address,
+      count: nfts.length,
+      nfts,
+      // Surface the threshold so a future UI toggle can show "maybe" entries
+      confidenceCutoff: 0.35,
+    });
+  } catch (e) {
+    console.error("NFT fetch error:", e.message);
+    res.status(500).json({ error: "Failed to fetch NFTs" });
+  }
+});
+
+// Soroban contract NFTs (SEP-50, including Meridian Pay collections).
+// Proxies SDF's official Freighter backend rather than reimplementing Soroban
+// RPC token enumeration. See lib/collectibles-resolver.js for the full
+// rationale and source-code references.
+app.get("/api/v1/account/:address/collectibles", async (req, res) => {
+  try {
+    const { address } = req.params;
+    const result = await resolveSorobanCollectibles(address);
+    res.json({ address, ...result });
+  } catch (e) {
+    console.error("Collectibles fetch error:", e.message);
+    res.status(502).json({ error: "Failed to fetch collectibles", detail: e.message });
   }
 });
 
@@ -1034,6 +1075,15 @@ async function fetchPortfolioForScheduler(address) {
     }
   } catch (e) { /* ignore for scheduler */ }
 
+  // Auto-discovered Soroban tokens (cached, so usually a no-op in the scheduler loop)
+  try {
+    const discoveredTokens = await discoverSorobanTokens(address);
+    for (const dt of discoveredTokens) {
+      totalValueUSD += dt.valueUSD || 0;
+      balances.push(dt);
+    }
+  } catch (e) { /* ignore for scheduler */ }
+
   // DeFi positions
   const defiPositions = [];
   for (const adapter of PROTOCOL_ADAPTERS) {
@@ -1063,7 +1113,7 @@ snapshotScheduler.init(fetchPortfolioForScheduler);
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
-  console.log(`Stellar DeBank API running on http://localhost:${PORT}`);
+  console.log(`Stellar Moonshot Bank API running on http://localhost:${PORT}`);
   console.log(`Dashboard: http://localhost:${PORT}`);
 
   // Start background snapshot scheduler

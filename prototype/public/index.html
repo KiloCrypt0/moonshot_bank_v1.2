@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Stellar DeBank</title>
+  <title>Stellar Moonshot Bank</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/stellar-freighter-api/2.0.0/index.min.js"></script>
   <style>
     :root {
@@ -925,6 +925,85 @@
       color: var(--text-muted);
     }
 
+    /* ── NFT gallery ────────────────────────────────────────── */
+    .nft-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 16px;
+      margin-top: 8px;
+    }
+    .nft-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: transform 0.15s, border-color 0.15s;
+    }
+    .nft-card:hover {
+      transform: translateY(-2px);
+      border-color: var(--accent);
+    }
+    .nft-card-image {
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      object-fit: cover;
+      background: var(--bg-secondary);
+      display: block;
+    }
+    .nft-card-image-fallback {
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      background: linear-gradient(135deg, var(--bg-hover), var(--bg-secondary));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text-muted);
+      letter-spacing: 1px;
+    }
+    .nft-card-body {
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .nft-card-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .nft-card-code {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .nft-card-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 6px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .nft-confidence {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .nft-confidence.high { background: rgba(34, 197, 94, 0.15); color: var(--green); }
+    .nft-confidence.med  { background: rgba(234, 179, 8, 0.15); color: var(--yellow); }
+    .nft-confidence.low  { background: rgba(100, 116, 139, 0.15); color: var(--text-muted); }
+
     /* ── Portfolio breakdown bar ────────────────────────────── */
     .breakdown-bar {
       display: flex;
@@ -1126,7 +1205,7 @@
   <div class="header">
     <div class="logo">
       <div class="logo-icon">S</div>
-      Stellar DeBank
+      Stellar Moonshot Bank
     </div>
     <div class="search-container">
       <div class="search-box">
@@ -1153,7 +1232,7 @@
 
   <div class="main" id="app">
     <div class="welcome" id="welcomeState">
-      <h1>Stellar DeBank</h1>
+      <h1>Stellar Moonshot Bank</h1>
       <p>Full portfolio visibility — track multiple wallets, Soroban DeFi, LP positions, and portfolio value over time.</p>
 
       <div style="display: flex; gap: 16px; justify-content: center; margin-bottom: 32px; flex-wrap: wrap;">
@@ -1187,6 +1266,7 @@
     let currentTab = "tokens";
     let historyData = null;
     let claimableData = null;
+    let nftsData = null;
     let portfolioHistory = null;
     let portfolioHistoryRange = "30d";
     let freighterConnected = false;
@@ -1333,16 +1413,6 @@
           console.log("Freighter wallet detected");
         }
 
-        // Auto-enter portfolio mode if there are saved wallets
-        try {
-          await loadWalletList();
-          if (walletList.length > 0) {
-            activeView = "all";
-            await loadMultiWalletPortfolio();
-          }
-        } catch (e) {
-          console.log("No saved wallets, showing welcome");
-        }
       }, 500);
     });
 
@@ -1537,6 +1607,7 @@
           };
           historyData = null;
           claimableData = null;
+          nftsData = null;
           portfolioHistory = null;
           currentTab = "tokens";
 
@@ -1587,6 +1658,9 @@
           </button>
           <button class="tab ${currentTab === "claimable" ? "active" : ""}" onclick="switchTab('claimable')">
             Claimable
+          </button>
+          <button class="tab ${currentTab === "nfts" ? "active" : ""}" onclick="switchTab('nfts')">
+            NFTs
           </button>
         </div>
         <div id="tabContent"></div>
@@ -1956,6 +2030,7 @@
         currentData = await res.json();
         historyData = null;
         claimableData = null;
+        nftsData = null;
         portfolioHistory = null;
         currentTab = "tokens";
         renderPortfolio();
@@ -2081,6 +2156,9 @@
           <button class="tab ${currentTab === "claimable" ? "active" : ""}" onclick="switchTab('claimable')">
             Claimable
           </button>
+          <button class="tab ${currentTab === "nfts" ? "active" : ""}" onclick="switchTab('nfts')">
+            NFTs
+          </button>
         </div>
 
         <div id="tabContent"></div>
@@ -2112,6 +2190,8 @@
         await renderHistory(container);
       } else if (currentTab === "claimable") {
         await renderClaimable(container);
+      } else if (currentTab === "nfts") {
+        await renderNfts(container);
       }
     }
 
@@ -2749,6 +2829,129 @@
       });
       html += "</div>";
       container.innerHTML = html;
+    }
+
+    // ── Render NFTs ───────────────────────────────────────────
+    async function renderNfts(container) {
+      if (!nftsData) {
+        container.innerHTML = '<div class="loading"><div class="spinner"></div><div style="color:var(--text-secondary)">Scanning balances and resolving issuer metadata… <br/><span style="font-size:11px">(checking classic assets + Soroban contracts)</span></div></div>';
+        try {
+          // Fire both requests in parallel: SEP-39 classic-asset NFTs and
+          // SEP-50 Soroban-contract NFTs (incl. Meridian Pay).
+          const [classicRes, sorobanRes] = await Promise.all([
+            fetch(`${API_BASE}/api/v1/account/${currentData.address}/nfts`).then((r) => r.json()).catch(() => ({ nfts: [] })),
+            fetch(`${API_BASE}/api/v1/account/${currentData.address}/collectibles`).then((r) => r.json()).catch(() => ({ collections: [] })),
+          ]);
+          nftsData = { classic: classicRes, soroban: sorobanRes };
+        } catch (e) {
+          container.innerHTML = '<div class="error-banner">Failed to load NFTs</div>';
+          return;
+        }
+      }
+
+      const classicNfts = (nftsData.classic && nftsData.classic.nfts) || [];
+      const sorobanCollections = (nftsData.soroban && nftsData.soroban.collections) || [];
+      const sorobanItemCount = sorobanCollections.reduce((sum, c) => sum + c.count, 0);
+      const totalCount = classicNfts.length + sorobanItemCount;
+
+      if (totalCount === 0) {
+        container.innerHTML = `
+          <div class="empty-state">
+            No NFTs detected.
+            <div style="font-size: 12px; margin-top: 6px;">
+              Checked classic Stellar assets (SEP-39) and Soroban smart-contract collections (SEP-50).
+            </div>
+          </div>`;
+        return;
+      }
+
+      let html = "";
+
+      // ── Soroban (SEP-50) collections — group by collection ──
+      for (const col of sorobanCollections) {
+        html += `
+          <div style="margin-top: 8px; margin-bottom: 16px;">
+            <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:12px;">
+              <div>
+                <div style="font-size:16px; font-weight:600; color:var(--text-primary);">${escapeHtml(col.name)}</div>
+                <div style="font-size:11px; color:var(--text-muted); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; margin-top:2px;">
+                  ${escapeHtml(col.symbol)} · ${escapeHtml(shortenAddr(col.address))} · Soroban
+                </div>
+              </div>
+              <div style="font-size:12px; color:var(--text-secondary);">${col.count} item${col.count === 1 ? "" : "s"}</div>
+            </div>
+            <div class="nft-grid">
+              ${col.items.map((item) => {
+                const name = (item.metadata && item.metadata.name) || `#${item.tokenId}`;
+                const image = item.metadata && item.metadata.image;
+                const desc = (item.metadata && item.metadata.description) || "";
+
+                const imageHtml = image
+                  ? `<img class="nft-card-image" src="${escapeHtml(image)}" alt="${escapeHtml(name)}" loading="lazy" onerror="this.outerHTML='<div class=&quot;nft-card-image-fallback&quot;>NFT</div>'">`
+                  : `<div class="nft-card-image-fallback">#${escapeHtml(item.tokenId)}</div>`;
+
+                return `
+                  <div class="nft-card">
+                    ${imageHtml}
+                    <div class="nft-card-body">
+                      <div class="nft-card-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
+                      <div class="nft-card-code">Token #${escapeHtml(item.tokenId)}</div>
+                      ${desc ? `<div class="nft-card-meta" style="display:block; font-size:11px; line-height:1.4; margin-top:6px; color:var(--text-muted);">${escapeHtml(desc.length > 100 ? desc.slice(0, 100) + "…" : desc)}</div>` : ""}
+                    </div>
+                  </div>`;
+              }).join("")}
+            </div>
+          </div>`;
+      }
+
+      // ── Classic SEP-39 NFTs (with confidence heuristic) ──
+      if (classicNfts.length > 0) {
+        html += `
+          <div style="margin-top: 24px; margin-bottom: 12px;">
+            <div style="font-size:16px; font-weight:600; color:var(--text-primary);">Classic Stellar NFTs</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">SEP-39 trustline assets with NFT-like properties</div>
+          </div>
+          <div class="nft-grid">
+            ${classicNfts.map((n) => {
+              const name = (n.metadata && n.metadata.name) || n.asset.code;
+              const code = n.asset.code;
+              const image = n.metadata && n.metadata.image;
+              const confidenceClass = n.confidence >= 0.7 ? "high" : n.confidence >= 0.5 ? "med" : "low";
+              const confidenceLabel = n.confidence >= 0.7 ? "Likely" : n.confidence >= 0.5 ? "Probable" : "Maybe";
+
+              const imageHtml = image
+                ? `<img class="nft-card-image" src="${escapeHtml(image)}" alt="${escapeHtml(name)}" loading="lazy" onerror="this.outerHTML='<div class=&quot;nft-card-image-fallback&quot;>'+this.alt.slice(0,2).toUpperCase()+'</div>'">`
+                : `<div class="nft-card-image-fallback">${escapeHtml(code.slice(0, 2).toUpperCase())}</div>`;
+
+              return `
+                <div class="nft-card">
+                  ${imageHtml}
+                  <div class="nft-card-body">
+                    <div class="nft-card-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
+                    <div class="nft-card-code">${escapeHtml(code)} · ${escapeHtml(shortenAddr(n.asset.issuer))}</div>
+                    <div class="nft-card-meta">
+                      <span>${n.asset.domain ? escapeHtml(n.asset.domain) : "no domain"}</span>
+                      <span class="nft-confidence ${confidenceClass}">${confidenceLabel}</span>
+                    </div>
+                  </div>
+                </div>`;
+            }).join("")}
+          </div>`;
+      }
+
+      container.innerHTML = html;
+    }
+
+    // Minimal HTML escaper for untrusted metadata fields (stellar.toml content
+    // is controlled by issuers and can contain anything).
+    function escapeHtml(s) {
+      if (s === null || s === undefined) return "";
+      return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
     }
   </script>
 </body>
