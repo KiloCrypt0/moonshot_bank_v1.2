@@ -130,21 +130,26 @@ async function getPoolConfig(poolContractId) {
 
 /**
  * Convert protocol token amount (bTokens/dTokens) to underlying asset amount.
- * b_rate and d_rate are fixed-point with 9 decimal places in Blend v2.
+ *
+ * b_rate and d_rate are fixed-point. The Blend SDK uses a scalar (often
+ * referred to as BLEND_RATE_SCALAR in integrator code) to convert protocol
+ * tokens to underlying. Default: 1e9 (9 decimals of precision). Configurable
+ * via BLEND_RATE_SCALAR_DECIMALS in case Blend changes this.
  */
+const RATE_SCALAR_DECIMALS = parseInt(process.env.BLEND_RATE_SCALAR_DECIMALS || "9", 10);
+
 function protocolToUnderlying(protocolAmount, rate, decimals = 7) {
   if (!rate || !protocolAmount) return 0;
-  // rate is typically a large integer representing a fixed-point number
-  // The conversion: underlying = protocolAmount * rate / 10^9
+  // rate is a fixed-point integer; underlying = protocolAmount * rate / scaleFactor
   try {
     const amount = BigInt(protocolAmount);
     const rateVal = BigInt(rate);
-    const scaleFactor = BigInt(10 ** 9);
+    const scaleFactor = 10n ** BigInt(RATE_SCALAR_DECIMALS);
     const underlying = (amount * rateVal) / scaleFactor;
     return Number(underlying) / (10 ** decimals);
   } catch (e) {
     // Fallback for non-BigInt values
-    return (Number(protocolAmount) * Number(rate)) / 1e9 / (10 ** decimals);
+    return (Number(protocolAmount) * Number(rate)) / (10 ** RATE_SCALAR_DECIMALS) / (10 ** decimals);
   }
 }
 
@@ -203,12 +208,34 @@ async function _buildEnrichedPosition({
 }) {
   const { symbol, decimals } = await _resolveAssetMetadata(assetAddress);
 
-  // Borrow uses d_rate; supply/collateral uses b_rate
+  // Borrow uses d_rate; supply/collateral uses b_rate.
+  // These live inside reserveData.data (a sub-struct) per Blend V2's
+  // ReserveV2 layout — `reserveData.data.b_rate` not `reserveData.b_rate`.
+  // The serde wrappers may also expose camelCase variants, so we tolerate both.
+  const reserveDataInner = reserveData?.data || reserveData || {};
   const rate = subtype === "liability"
-    ? (reserveData?.d_rate || reserveData?.dRate)
-    : (reserveData?.b_rate || reserveData?.bRate);
+    ? (reserveDataInner.d_rate ?? reserveDataInner.dRate)
+    : (reserveDataInner.b_rate ?? reserveDataInner.bRate);
 
   const underlyingAmount = protocolToUnderlying(protocolTokenAmount, rate, decimals);
+
+  // Diagnostic: if we got non-zero protocol tokens but underlyingAmount is zero,
+  // something about the rate or scalar is off. Log it so we can investigate
+  // without re-deploying.
+  if (
+    underlyingAmount === 0 &&
+    protocolTokenAmount &&
+    BigInt(protocolTokenAmount) > 0n
+  ) {
+    console.warn(
+      `[Blend] underlyingAmount=0 from non-zero protocolTokens. ` +
+        `pool=${pool.contractId.slice(0, 10)} asset=${assetAddress.slice(0, 10)} ` +
+        `subtype=${subtype} protocolTokens=${protocolTokenAmount.toString()} ` +
+        `rate=${rate ?? "(missing)"} decimals=${decimals} ` +
+        `reserveDataKeys=${Object.keys(reserveData || {}).join(",")} ` +
+        `dataKeys=${Object.keys((reserveData || {}).data || {}).join(",")}`
+    );
+  }
 
   // Price the underlying asset and compute USD value. For liabilities, the
   // value is the negative of the priced amount so that summing across all
