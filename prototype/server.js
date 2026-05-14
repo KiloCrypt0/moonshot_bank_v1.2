@@ -8,6 +8,7 @@ const path = require("path");
 const historyDb = require("./lib/history-db");
 const { resolveSorobanTokens, resolveCustomToken, getRegistry } = require("./lib/token-resolver");
 const { discoverSorobanTokens } = require("./lib/contract-discovery");
+const { isKnownSAC, classicForSAC, classicMatches } = require("./lib/sac-mapping");
 const pricingEngine = require("./lib/pricing-engine");
 const SushiSwapV3Adapter = require("./lib/adapters/sushiswap-v3");
 const SolvProtocolAdapter = require("./lib/adapters/solv-protocol");
@@ -128,6 +129,38 @@ function isStablecoin(code, issuer) {
   return STABLECOINS[`${code}:${issuer}`] !== undefined;
 }
 
+/**
+ * Filter Soroban-discovered tokens to remove SAC entries that double-count a
+ * classic asset already present in `balances`. Returns the filtered array.
+ *
+ * Why: well-known SAC contracts (XLM SAC, USDC SAC) wrap the same underlying
+ * economic asset as their classic counterpart. Probe-based discovery finds
+ * them; the classic-side fetch already finds the underlying. Without filtering,
+ * a wallet with 100 native XLM appears as 200 XLM (100 native + 100 SAC).
+ *
+ * For each discovered token whose contract is a known SAC, we check whether
+ * the underlying classic asset is already represented in `balances`. If so,
+ * we drop the SAC entry. If the wallet truly holds the SAC version with no
+ * classic counterpart (rare but valid), the SAC entry remains.
+ */
+function dedupSACsAgainstClassicBalances(discoveredTokens, classicBalances) {
+  if (!Array.isArray(discoveredTokens) || discoveredTokens.length === 0) {
+    return discoveredTokens || [];
+  }
+  return discoveredTokens.filter((tok) => {
+    const cid = tok && tok.asset && tok.asset.contractId;
+    if (!cid || !isKnownSAC(cid)) return true;
+    const underlying = classicForSAC(cid);
+    const matchedClassic = (classicBalances || []).find((b) => classicMatches(b, underlying));
+    // Drop the SAC entry only if the classic balance exists AND is non-zero
+    // (a wallet holding the SAC-only is preserved).
+    if (matchedClassic && parseFloat(matchedClassic.balance) > 0) {
+      return false;
+    }
+    return true;
+  });
+}
+
 // ── API Routes ────────────────────────────────────────────────────────────────
 
 // Full portfolio summary
@@ -229,7 +262,11 @@ app.get("/api/v1/account/:address", async (req, res) => {
     // contracts and queries balances. Cached per address (5 min default).
     let discoveredTokens = [];
     try {
-      discoveredTokens = await discoverSorobanTokens(address);
+      const rawDiscovered = await discoverSorobanTokens(address);
+      // Deduplicate well-known SAC contracts (XLM SAC, USDC SAC) against the
+      // classic balances already in `balances` to avoid showing the same
+      // economic asset twice.
+      discoveredTokens = dedupSACsAgainstClassicBalances(rawDiscovered, balances);
       for (const dt of discoveredTokens) {
         totalValueUSD += dt.valueUSD || 0;
         balances.push(dt);
@@ -1340,7 +1377,8 @@ async function fetchPortfolioForScheduler(address) {
 
   // Auto-discovered Soroban tokens (cached, so usually a no-op in the scheduler loop)
   try {
-    const discoveredTokens = await discoverSorobanTokens(address);
+    const rawDiscovered = await discoverSorobanTokens(address);
+    const discoveredTokens = dedupSACsAgainstClassicBalances(rawDiscovered, balances);
     for (const dt of discoveredTokens) {
       totalValueUSD += dt.valueUSD || 0;
       balances.push(dt);

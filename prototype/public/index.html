@@ -965,6 +965,7 @@
 
     .defi-protocol-icon.sushi { background: linear-gradient(135deg, #d946ef, #f97316); }
     .defi-protocol-icon.solv { background: linear-gradient(135deg, #f59e0b, #ef4444); }
+    .defi-protocol-icon.blend { background: linear-gradient(135deg, #10b981, #059669); }
     .defi-protocol-icon.default { background: var(--bg-hover); }
 
     .defi-type-badge {
@@ -3261,10 +3262,8 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         const configuredMsg = protocols.length > 0
           ? `<div style="margin-top:8px; font-size:13px">Tracking: ${protocols.map(p => p.name).join(", ")}</div>`
           : `<div style="margin-top:12px; font-size:13px; color:var(--text-muted)">
-               Configure protocol adapters to track Soroban DeFi positions.<br>
-               Supported: SushiSwap V3, Solv Protocol<br><br>
-               Set contract IDs via environment variables:<br>
-               <code style="font-size:12px; color:var(--accent-light)">SUSHI_FACTORY_CONTRACT_ID, SOLVBTC_CONTRACT_ID</code>
+               No supported DeFi protocols are configured for this deployment.<br>
+               Supported: Blend Protocol, SushiSwap V3, Solv Protocol
              </div>`;
         container.innerHTML = `<div class="empty-state">No DeFi positions found${configuredMsg}</div>`;
         return;
@@ -3273,9 +3272,11 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
       let html = "";
       positions.forEach((pos) => {
         const protocolIcon = pos.protocol === "sushiswap-v3" ? "sushi"
-          : pos.protocol === "solv-protocol" ? "solv" : "default";
+          : pos.protocol === "solv-protocol" ? "solv"
+          : pos.protocol === "blend" ? "blend" : "default";
         const protocolLabel = pos.protocol === "sushiswap-v3" ? "SushiSwap V3"
-          : pos.protocol === "solv-protocol" ? "Solv Protocol" : pos.protocol;
+          : pos.protocol === "solv-protocol" ? "Solv Protocol"
+          : pos.protocol === "blend" ? "Blend Protocol" : pos.protocol;
         const typeLabel = pos.type.replace(/_/g, " ");
 
         html += `<div class="defi-card">`;
@@ -3288,6 +3289,12 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
           html += `<div style="font-size:12px; color:var(--text-muted)">${pos.token0.symbol} / ${pos.token1.symbol}`;
           if (pos.feeTier) html += ` (${pos.feeTier / 10000}%)`;
           html += `</div>`;
+        } else if (pos.protocol === "blend") {
+          // Blend positions: show "<Pool name> · <asset> <subtype>"
+          const subtypeLabel = pos.subtype === "liability" ? "borrowed"
+            : pos.subtype === "collateral" ? "supplied (collateral)"
+            : "supplied";
+          html += `<div style="font-size:12px; color:var(--text-muted)">${pos.poolName || "Blend Pool"} · ${pos.asset} ${subtypeLabel}</div>`;
         }
         html += `</div></div>`;
         html += `<div class="defi-type-badge ${pos.type}">${typeLabel}</div>`;
@@ -3357,13 +3364,48 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
               <div class="defi-detail-value">${fmt(pos.shareOfPool * 100, 4)}%</div>
             </div>
           `;
-        }
-
-        if (pos.valueUSD > 0) {
+        } else if (pos.type === "lending") {
+          // Blend Protocol supply/collateral position
+          const subtypeLabel = pos.subtype === "collateral" ? "Collateral" : "Supplied";
           html += `
             <div class="defi-detail-item">
-              <div class="defi-detail-label">Value</div>
-              <div class="defi-detail-value">${fmtUSD(pos.valueUSD)}</div>
+              <div class="defi-detail-label">${subtypeLabel}</div>
+              <div class="defi-detail-value">${fmt(pos.underlyingAmount, 4)} ${pos.asset}</div>
+            </div>
+          `;
+          if (pos.price && pos.price.usd) {
+            html += `
+              <div class="defi-detail-item">
+                <div class="defi-detail-label">Price</div>
+                <div class="defi-detail-value">${fmtUSD(pos.price.usd)}</div>
+              </div>
+            `;
+          }
+        } else if (pos.type === "borrowing") {
+          // Blend Protocol borrow position — debt, shown with a negative value
+          html += `
+            <div class="defi-detail-item">
+              <div class="defi-detail-label">Borrowed</div>
+              <div class="defi-detail-value" style="color:var(--red)">${fmt(pos.underlyingAmount, 4)} ${pos.asset}</div>
+            </div>
+          `;
+          if (pos.price && pos.price.usd) {
+            html += `
+              <div class="defi-detail-item">
+                <div class="defi-detail-label">Price</div>
+                <div class="defi-detail-value">${fmtUSD(pos.price.usd)}</div>
+              </div>
+            `;
+          }
+        }
+
+        if (pos.valueUSD !== 0 && pos.valueUSD != null) {
+          const valueColor = pos.valueUSD < 0 ? "color:var(--red)" : "";
+          const valueLabel = pos.subtype === "liability" ? "Debt" : "Value";
+          html += `
+            <div class="defi-detail-item">
+              <div class="defi-detail-label">${valueLabel}</div>
+              <div class="defi-detail-value" style="${valueColor}">${fmtUSD(pos.valueUSD)}</div>
             </div>
           `;
         }

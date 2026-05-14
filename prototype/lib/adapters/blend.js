@@ -24,6 +24,8 @@ const {
 } = require("../soroban-rpc");
 const StellarSdk = require("@stellar/stellar-sdk");
 const { Address, scValToNative, nativeToScVal } = StellarSdk;
+const tokenUniverse = require("../token-universe");
+const { priceSorobanToken } = require("../pricing-engine");
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 
@@ -41,11 +43,15 @@ const BLEND_CONFIG = {
   //   }
   // ]
 
-  // Well-known mainnet pool IDs (fallback if env not set)
-  // These are discovered from Blend's pool factory
+  // Well-known mainnet pool contract IDs (always queried; users can add more
+  // via the BLEND_POOLS env var). These are pools the blend-capital UI lists
+  // at https://mainnet.blend.capital/ — the Fixed Pool V2 is the most active.
+  // As Blend deploys new pools via its Pool Factory
+  // (CDSYOAVXFY7SM5S64IZPPPYB4GVGGLMQVFREPSQQEZVIWXX5R23G4QSU), we'll add them
+  // here. A future enhancement could query the factory for emitted
+  // `pool_deployed` events instead of maintaining this list manually.
   knownPools: [
-    // Add known mainnet pool contract IDs here as they're discovered
-    // { contractId: "C...", name: "Main Pool" }
+    { contractId: "CAJJZSGMMM3PD7N33TAPHGBUGTB43OC73HVIK2L2G6BNGGGYOSSYBXBD", name: "Fixed Pool V2" },
   ],
 };
 
@@ -143,6 +149,98 @@ function protocolToUnderlying(protocolAmount, rate, decimals = 7) {
 }
 
 /**
+ * Resolve metadata (symbol + decimals) for an asset, with the same
+ * universe-first / RPC-fallback pattern used elsewhere in the codebase
+ * (see contract-discovery.js for prior art). Returns { symbol, decimals }.
+ *
+ * Why universe-first: Soroban RPC metadata calls can fail (rate-limit,
+ * transient errors). For well-known assets we already know the decimals,
+ * and using the wrong decimals corrupts the underlying-amount calculation
+ * — which we learned the hard way with SolvBTC on the discovery side.
+ */
+async function _resolveAssetMetadata(assetAddress) {
+  let symbol = null;
+  let decimals = null;
+
+  const universeEntry = tokenUniverse.get(assetAddress);
+  if (universeEntry) {
+    if (universeEntry.symbol) symbol = universeEntry.symbol;
+    if (universeEntry.decimals != null) decimals = universeEntry.decimals;
+  }
+
+  if (decimals == null || !symbol) {
+    try {
+      const meta = await getTokenMetadata(assetAddress);
+      if (meta) {
+        if (decimals == null) decimals = meta.decimals;
+        if (!symbol) symbol = meta.symbol;
+        // Cache what we learned for next time
+        try {
+          tokenUniverse.add(assetAddress, { symbol, decimals, source: "blend-discovered" });
+        } catch (_) {}
+      }
+    } catch (_) {}
+  }
+
+  if (decimals == null) decimals = 7;
+  if (!symbol) symbol = "???";
+  return { symbol, decimals };
+}
+
+/**
+ * Build a single position object and enrich it with the current USD price.
+ * For borrow positions (subtype === "liability"), the returned valueUSD is
+ * negative — this correctly represents debt against total net worth.
+ */
+async function _buildEnrichedPosition({
+  pool,
+  positionType,
+  subtype,
+  reserveIndex,
+  assetAddress,
+  protocolTokenAmount,
+  reserveData,
+}) {
+  const { symbol, decimals } = await _resolveAssetMetadata(assetAddress);
+
+  // Borrow uses d_rate; supply/collateral uses b_rate
+  const rate = subtype === "liability"
+    ? (reserveData?.d_rate || reserveData?.dRate)
+    : (reserveData?.b_rate || reserveData?.bRate);
+
+  const underlyingAmount = protocolToUnderlying(protocolTokenAmount, rate, decimals);
+
+  // Price the underlying asset and compute USD value. For liabilities, the
+  // value is the negative of the priced amount so that summing across all
+  // positions yields the correct net-of-debt portfolio total.
+  let valueUSD = 0;
+  let price = null;
+  try {
+    price = await priceSorobanToken(assetAddress, { decimals });
+    if (price && Number.isFinite(underlyingAmount)) {
+      valueUSD = underlyingAmount * price.usd;
+      if (subtype === "liability") valueUSD = -valueUSD;
+    }
+  } catch (_) {}
+
+  return {
+    protocol: "blend",
+    type: positionType,
+    subtype,
+    poolContractId: pool.contractId,
+    poolName: pool.name || "Blend Pool",
+    assetAddress,
+    asset: symbol,
+    decimals,
+    protocolTokens: protocolTokenAmount.toString(),
+    underlyingAmount,
+    reserveIndex: Number(reserveIndex),
+    valueUSD,
+    price: price ? { usd: price.usd, source: price.source } : null,
+  };
+}
+
+/**
  * Resolve all positions for a user across all configured Blend pools.
  */
 async function resolveUserPositions(userAddress) {
@@ -154,116 +252,41 @@ async function resolveUserPositions(userAddress) {
       const userPositions = await getPositions(pool.contractId, userAddress);
       if (!userPositions) continue;
 
-      // Get reserve list to map indices to asset addresses
       const reserveList = await getReserveList(pool.contractId);
       if (!reserveList || reserveList.length === 0) continue;
 
-      // Process collateral positions (most common for suppliers)
-      const collateralMap = userPositions.collateral || userPositions.Collateral || new Map();
-      for (const [reserveIndex, bTokenAmount] of Object.entries(collateralMap)) {
-        if (!bTokenAmount || BigInt(bTokenAmount) === 0n) continue;
+      // Position kinds we care about. Each entry is:
+      // { mapKeys: [variants], positionType, subtype }
+      const positionKinds = [
+        { mapKeys: ["collateral", "Collateral"], positionType: "lending",   subtype: "collateral" },
+        { mapKeys: ["supply",     "Supply"],     positionType: "lending",   subtype: "supply" },
+        { mapKeys: ["liabilities","Liabilities"],positionType: "borrowing", subtype: "liability" },
+      ];
 
-        const assetAddress = reserveList[Number(reserveIndex)];
-        if (!assetAddress) continue;
+      for (const kind of positionKinds) {
+        const map = kind.mapKeys.reduce(
+          (acc, k) => acc || userPositions[k],
+          null
+        ) || new Map();
 
-        const reserve = await getReserve(pool.contractId, assetAddress);
-        let metadata = { symbol: "???", decimals: 7 };
-        try {
-          metadata = await getTokenMetadata(assetAddress);
-        } catch (e) { /* use defaults */ }
+        for (const [reserveIndex, protocolTokenAmount] of Object.entries(map)) {
+          if (!protocolTokenAmount || BigInt(protocolTokenAmount) === 0n) continue;
 
-        const underlyingAmount = protocolToUnderlying(
-          bTokenAmount,
-          reserve?.b_rate || reserve?.bRate,
-          metadata.decimals
-        );
+          const assetAddress = reserveList[Number(reserveIndex)];
+          if (!assetAddress) continue;
 
-        positions.push({
-          protocol: "blend",
-          type: "lending",
-          subtype: "collateral",
-          poolContractId: pool.contractId,
-          poolName: pool.name || "Blend Pool",
-          assetAddress,
-          asset: metadata.symbol,
-          decimals: metadata.decimals,
-          protocolTokens: bTokenAmount.toString(),
-          underlyingAmount,
-          reserveIndex: Number(reserveIndex),
-          valueUSD: 0, // Enriched by caller
-        });
-      }
-
-      // Process supply positions (non-collateral supply)
-      const supplyMap = userPositions.supply || userPositions.Supply || new Map();
-      for (const [reserveIndex, bTokenAmount] of Object.entries(supplyMap)) {
-        if (!bTokenAmount || BigInt(bTokenAmount) === 0n) continue;
-
-        const assetAddress = reserveList[Number(reserveIndex)];
-        if (!assetAddress) continue;
-
-        const reserve = await getReserve(pool.contractId, assetAddress);
-        let metadata = { symbol: "???", decimals: 7 };
-        try {
-          metadata = await getTokenMetadata(assetAddress);
-        } catch (e) {}
-
-        const underlyingAmount = protocolToUnderlying(
-          bTokenAmount,
-          reserve?.b_rate || reserve?.bRate,
-          metadata.decimals
-        );
-
-        positions.push({
-          protocol: "blend",
-          type: "lending",
-          subtype: "supply",
-          poolContractId: pool.contractId,
-          poolName: pool.name || "Blend Pool",
-          assetAddress,
-          asset: metadata.symbol,
-          decimals: metadata.decimals,
-          protocolTokens: bTokenAmount.toString(),
-          underlyingAmount,
-          reserveIndex: Number(reserveIndex),
-          valueUSD: 0,
-        });
-      }
-
-      // Process liability positions (borrows)
-      const liabilitiesMap = userPositions.liabilities || userPositions.Liabilities || new Map();
-      for (const [reserveIndex, dTokenAmount] of Object.entries(liabilitiesMap)) {
-        if (!dTokenAmount || BigInt(dTokenAmount) === 0n) continue;
-
-        const assetAddress = reserveList[Number(reserveIndex)];
-        if (!assetAddress) continue;
-
-        const reserve = await getReserve(pool.contractId, assetAddress);
-        let metadata = { symbol: "???", decimals: 7 };
-        try {
-          metadata = await getTokenMetadata(assetAddress);
-        } catch (e) {}
-
-        const underlyingAmount = protocolToUnderlying(
-          dTokenAmount,
-          reserve?.d_rate || reserve?.dRate,
-          metadata.decimals
-        );
-
-        positions.push({
-          protocol: "blend",
-          type: "borrowing",
-          subtype: "liability",
-          poolContractId: pool.contractId,
-          poolName: pool.name || "Blend Pool",
-          assetAddress,
-          asset: metadata.symbol,
-          decimals: metadata.decimals,
-          protocolTokens: dTokenAmount.toString(),
-          underlyingAmount,
-          reserveIndex: Number(reserveIndex),
-          valueUSD: 0, // Negative value — this is debt
-        });
+          const reserveData = await getReserve(pool.contractId, assetAddress);
+          const position = await _buildEnrichedPosition({
+            pool,
+            positionType: kind.positionType,
+            subtype: kind.subtype,
+            reserveIndex,
+            assetAddress,
+            protocolTokenAmount,
+            reserveData,
+          });
+          positions.push(position);
+        }
       }
     } catch (e) {
       console.error(`[Blend] Error resolving positions for pool ${pool.contractId}:`, e.message);
