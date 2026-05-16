@@ -131,25 +131,44 @@ async function getPoolConfig(poolContractId) {
 /**
  * Convert protocol token amount (bTokens/dTokens) to underlying asset amount.
  *
- * b_rate and d_rate are fixed-point. The Blend SDK uses a scalar (often
- * referred to as BLEND_RATE_SCALAR in integrator code) to convert protocol
- * tokens to underlying. Default: 1e9 (9 decimals of precision). Configurable
- * via BLEND_RATE_SCALAR_DECIMALS in case Blend changes this.
+ * Two distinct decimal concepts are at play here:
+ *
+ *   1. The asset's own decimals — XLM=7, USDC=7, SolvBTC=8, Centrifuge=18, etc.
+ *      This describes how the token represents 1 unit of itself on-chain
+ *      and is per-token, not per-protocol. Comes in via the `decimals`
+ *      argument and ultimately from the token universe / token contract.
+ *
+ *   2. Blend's internal rate scalar — a Blend V2 protocol invariant,
+ *      fixed at 12 decimals. b_rate and d_rate are stored as fixed-point
+ *      integers scaled by 10^12. This is *not* configurable per pool or
+ *      per asset; it's a property of how Blend V2 tracks interest accrual,
+ *      established at protocol design time.
+ *
+ * Don't confuse the two. Other protocols use entirely different internal
+ * scalars (SushiSwap V3 uses sqrtPriceX96 / Q96 = 2^96, Aave-style protocols
+ * commonly use 27-decimal "ray" math) — each adapter encodes its own
+ * protocol's scalar without inheriting from a shared constant.
+ *
+ * Verified empirically: with this scalar, the test wallet's positions of
+ * 8 XLM / 10 USDC supplied and 3 USDC borrowed are read correctly. With
+ * a 10^9 scalar (a prior guess based on Blend V1 conventions) the numbers
+ * came back exactly 1000× too high — the smoking gun that V2 uses 12, not 9.
  */
-const RATE_SCALAR_DECIMALS = parseInt(process.env.BLEND_RATE_SCALAR_DECIMALS || "9", 10);
+const BLEND_V2_RATE_SCALAR_DECIMALS = 12;
 
 function protocolToUnderlying(protocolAmount, rate, decimals = 7) {
   if (!rate || !protocolAmount) return 0;
-  // rate is a fixed-point integer; underlying = protocolAmount * rate / scaleFactor
+  // underlying_raw = protocolAmount × rate / 10^BLEND_V2_RATE_SCALAR_DECIMALS
+  // underlying     = underlying_raw / 10^decimals
   try {
     const amount = BigInt(protocolAmount);
     const rateVal = BigInt(rate);
-    const scaleFactor = 10n ** BigInt(RATE_SCALAR_DECIMALS);
+    const scaleFactor = 10n ** BigInt(BLEND_V2_RATE_SCALAR_DECIMALS);
     const underlying = (amount * rateVal) / scaleFactor;
     return Number(underlying) / (10 ** decimals);
   } catch (e) {
     // Fallback for non-BigInt values
-    return (Number(protocolAmount) * Number(rate)) / (10 ** RATE_SCALAR_DECIMALS) / (10 ** decimals);
+    return (Number(protocolAmount) * Number(rate)) / (10 ** BLEND_V2_RATE_SCALAR_DECIMALS) / (10 ** decimals);
   }
 }
 
@@ -219,16 +238,16 @@ async function _buildEnrichedPosition({
 
   const underlyingAmount = protocolToUnderlying(protocolTokenAmount, rate, decimals);
 
-  // Diagnostic: if we got non-zero protocol tokens but underlyingAmount is zero,
-  // something about the rate or scalar is off. Log it so we can investigate
-  // without re-deploying.
+  // Future canary: if Blend ever changes the reserve struct layout or
+  // rate-scalar convention, this warning will surface in server logs
+  // immediately rather than silently corrupting numbers.
   if (
     underlyingAmount === 0 &&
     protocolTokenAmount &&
     BigInt(protocolTokenAmount) > 0n
   ) {
     console.warn(
-      `[Blend] underlyingAmount=0 from non-zero protocolTokens. ` +
+      `[Blend] underlyingAmount=0 from non-zero protocolTokens — possible struct/scalar change. ` +
         `pool=${pool.contractId.slice(0, 10)} asset=${assetAddress.slice(0, 10)} ` +
         `subtype=${subtype} protocolTokens=${protocolTokenAmount.toString()} ` +
         `rate=${rate ?? "(missing)"} decimals=${decimals} ` +
