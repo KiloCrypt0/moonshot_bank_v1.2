@@ -168,9 +168,9 @@ function createRouter(fetchPortfolioFn) {
 
     res.send(`<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>${profile.displayName} — Moonshot Protocol</title>
+<title>${profile.displayName} — Stellar Scope</title>
 <meta name="description" content="${profile.bio || profile.displayName + "'s Stellar portfolio"}">
-<meta property="og:title" content="${profile.displayName} — Moonshot Protocol">
+<meta property="og:title" content="${profile.displayName} — Stellar Scope">
 <style>
 :root{--bg:#0a0e17;--card:#1a2332;--border:#2a3a4e;--text:#e2e8f0;--muted:#94a3b8;--accent:#6366f1;--green:#22c55e;--red:#ef4444}
 *{margin:0;padding:0;box-sizing:border-box}
@@ -198,7 +198,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .spinner{width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 16px}
 @keyframes spin{to{transform:rotate(360deg)}}
 </style></head><body>
-<div class="header"><a class="logo" href="/">Moonshot Protocol</a><span class="badge">Public Portfolio</span></div>
+<div class="header"><a class="logo" href="/">Stellar Scope</a><span class="badge">Public Portfolio</span></div>
 <div class="hero">
   <div class="avatar">${profile.avatarEmoji}</div>
   <div class="name">${profile.displayName}</div>
@@ -251,7 +251,7 @@ load();
   router.get("/api/docs", (req, res) => {
     res.send(`<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>API — Moonshot Protocol</title>
+<title>API — Stellar Scope</title>
 <style>
 :root{--bg:#0a0e17;--card:#1a2332;--border:#2a3a4e;--text:#e2e8f0;--muted:#94a3b8;--accent:#6366f1;--green:#22c55e}
 *{margin:0;padding:0;box-sizing:border-box}
@@ -275,7 +275,7 @@ a{color:var(--accent)}
 </style></head><body>
 <div class="container">
 <a class="back" href="/">&larr; Back to app</a>
-<h1>Moonshot Protocol API <span class="free-badge">Free &amp; Open</span></h1>
+<h1>Stellar Scope API <span class="free-badge">Free &amp; Open</span></h1>
 <p class="sub">Query any Stellar wallet's balances, DeFi positions, and historical snapshots. No API key needed — all Stellar data is public.</p>
 
 <h2>Rate limits</h2>
