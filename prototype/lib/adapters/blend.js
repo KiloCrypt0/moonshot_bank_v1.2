@@ -1,165 +1,175 @@
 /**
- * Blend Protocol Adapter for Stellar/Soroban
+ * Blend Capital — Stellar lending protocol adapter (V2).
  *
- * Blend is a universal liquidity protocol primitive on Stellar that enables
- * permissionless lending pools. Users can supply collateral and borrow assets.
+ * Responsibilities:
+ *   1. Discover Blend pools (Pool Factory event scan + hardcoded fallback)
+ *   2. For each pool: fetch user positions, reserve data, reserve config,
+ *      pending BLND emissions
+ *   3. Compute supply/borrow APR/APY from on-chain interest rate parameters
+ *   4. Resolve token metadata (decimals/symbol) from token universe with
+ *      RPC fallback (same self-healing pattern as PR #4 / SolvBTC fix)
+ *   5. Group output per pool so the frontend can render a DeBank-style
+ *      Supply/Borrow/Debt-Ratio/Value table per pool
  *
- * This adapter tracks:
- * 1. Supply/Collateral positions (bTokens → underlying via b_rate)
- * 2. Borrow/Liability positions (dTokens → underlying via d_rate)
- * 3. BLND emissions (claimable rewards)
- *
- * Contract interface (from blend-contracts-v2):
- *   get_positions(address) → Positions { collateral, liabilities, supply }
- *   get_reserve(asset)     → Reserve { b_rate, d_rate, index, ... }
- *   get_reserve_list()     → Vec<Address>
- *   get_config()           → PoolConfig
- *
- * Reference: https://docs.blend.capital/tech-docs/integrations/integrate-pool
+ * Key invariants (verified across PRs #18 / #19 / #20 fixes):
+ *   - r_base/r_one/r_two/r_three/util/c_factor/l_factor: 7-decimal fixed point
+ *   - b_rate / d_rate / ir_mod: live in reserveData.data
+ *     - b_rate / d_rate are 12-decimal scale (V2)
+ *     - ir_mod is 9-decimal scale (V1 convention, unchanged in V2 per docs)
+ *   - Position amounts: in protocol-token (bToken/dToken) units;
+ *     convert to underlying via amount * rate / 10^12
+ *   - Asset decimals: per-token (XLM/USDC=7, SolvBTC=8) — never assume 7
  */
+
 const {
   simulateContractCall,
   getTokenMetadata,
-  formatTokenAmount,
 } = require("../soroban-rpc");
 const StellarSdk = require("@stellar/stellar-sdk");
-const { Address, scValToNative, nativeToScVal } = StellarSdk;
+const { Address, nativeToScVal } = StellarSdk;
 const tokenUniverse = require("../token-universe");
 const { priceSorobanToken } = require("../pricing-engine");
 
-// ── Configuration ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────────────────────────────────────
 
-// Known Blend pool contract IDs on mainnet
-// Users can configure additional pools via env
-const BLEND_CONFIG = {
-  // Array of pool objects: { contractId, name, assets[] }
-  // Primary pools on mainnet
+const BLEND_V2_RATE_SCALAR_DECIMALS = 12;
+const BLEND_IR_MOD_SCALAR = 1e9;
+const SCALAR_7 = 1e7;
+
+const BLEND_POOL_FACTORY = process.env.BLEND_POOL_FACTORY ||
+  "CDSYOAVXFY7SM5S64IZPPPYB4GVGGLMQVFREPSQQEZVIWXX5R23G4QSU";
+
+const KNOWN_POOLS = [
+  { contractId: "CAJJZSGMMM3PD7N33TAPHGBUGTB43OC73HVIK2L2G6BNGGGYOSSYBXBD", name: "Fixed Pool V2" },
+];
+
+const POOL_DISCOVERY_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Module state
+// ─────────────────────────────────────────────────────────────────────────────
+
+const config = {
   pools: JSON.parse(process.env.BLEND_POOLS || "[]"),
-  // Example:
-  // [
-  //   {
-  //     "contractId": "CABC...",
-  //     "name": "USDC-XLM Pool"
-  //   }
-  // ]
-
-  // Well-known mainnet pool contract IDs (always queried; users can add more
-  // via the BLEND_POOLS env var). These are pools the blend-capital UI lists
-  // at https://mainnet.blend.capital/ — the Fixed Pool V2 is the most active.
-  // As Blend deploys new pools via its Pool Factory
-  // (CDSYOAVXFY7SM5S64IZPPPYB4GVGGLMQVFREPSQQEZVIWXX5R23G4QSU), we'll add them
-  // here. A future enhancement could query the factory for emitted
-  // `pool_deployed` events instead of maintaining this list manually.
-  knownPools: [
-    { contractId: "CAJJZSGMMM3PD7N33TAPHGBUGTB43OC73HVIK2L2G6BNGGGYOSSYBXBD", name: "Fixed Pool V2" },
-  ],
 };
 
-function getAllPools() {
-  return [...BLEND_CONFIG.pools, ...BLEND_CONFIG.knownPools].filter(
-    (p) => p.contractId
-  );
-}
+let _factoryPoolsCache = { pools: [], lastFetchTs: 0 };
 
-// ── Contract Queries ─────────────────────────────────────────────────────────
-
-/**
- * Get the list of reserve asset addresses for a pool.
- */
-async function getReserveList(poolContractId) {
-  try {
-    const result = await simulateContractCall(poolContractId, "get_reserve_list");
-    if (!result) return [];
-    return scValToNative(result);
-  } catch (e) {
-    console.error(`[Blend] get_reserve_list error for ${poolContractId}:`, e.message);
-    return [];
+function getConfiguredPools() {
+  const byId = new Map();
+  for (const list of [config.pools, KNOWN_POOLS, _factoryPoolsCache.pools]) {
+    for (const p of list || []) {
+      if (!p || !p.contractId) continue;
+      const existing = byId.get(p.contractId);
+      if (!existing || (!existing.name && p.name)) {
+        byId.set(p.contractId, p);
+      }
+    }
   }
+  return Array.from(byId.values());
 }
 
-/**
- * Get reserve data (including b_rate and d_rate for token conversion).
- */
+// ─────────────────────────────────────────────────────────────────────────────
+// Pool Factory event-scan discovery
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function _refreshFactoryPools() {
+  if (Date.now() - _factoryPoolsCache.lastFetchTs < POOL_DISCOVERY_CACHE_TTL_MS) {
+    return _factoryPoolsCache.pools;
+  }
+  try {
+    const rpc = require("../soroban-rpc");
+    if (typeof rpc.getEventsForContract === "function") {
+      const events = await rpc.getEventsForContract(BLEND_POOL_FACTORY, { limit: 200 });
+      const found = new Map();
+      for (const ev of events || []) {
+        const candidates = [
+          ...(ev.topic || []),
+          ...(ev.value ? [ev.value] : []),
+        ];
+        for (const c of candidates) {
+          const s = typeof c === "string" ? c : (c && c.toString ? c.toString() : "");
+          if (s && s.startsWith("C") && s.length >= 56 && s !== BLEND_POOL_FACTORY) {
+            if (!found.has(s)) {
+              found.set(s, { contractId: s, name: null, source: "factory" });
+            }
+          }
+        }
+      }
+      _factoryPoolsCache = { pools: Array.from(found.values()), lastFetchTs: Date.now() };
+      if (found.size > 0) {
+        console.log(`[Blend] Pool factory discovery found ${found.size} pools`);
+      }
+    }
+  } catch (e) {
+    console.warn(`[Blend] Pool factory discovery failed: ${e.message}`);
+    _factoryPoolsCache.lastFetchTs = Date.now();
+  }
+  return _factoryPoolsCache.pools;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Contract call wrappers
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function getReserveList(poolContractId) {
+  try { return await simulateContractCall(poolContractId, "get_reserve_list"); }
+  catch (e) { return null; }
+}
+
 async function getReserve(poolContractId, assetAddress) {
   try {
     const assetScVal = new Address(assetAddress).toScVal();
-    const result = await simulateContractCall(poolContractId, "get_reserve", [assetScVal]);
-    if (!result) return null;
-    return scValToNative(result);
-  } catch (e) {
-    console.error(`[Blend] get_reserve error:`, e.message);
-    return null;
-  }
+    return await simulateContractCall(poolContractId, "get_reserve", [assetScVal]);
+  } catch (e) { return null; }
 }
 
-/**
- * Get user positions in a Blend pool.
- * Returns: { collateral: Map<reserveIndex, amount>, liabilities: Map, supply: Map }
- */
-async function getPositions(poolContractId, userAddress) {
+async function getPoolConfig(poolContractId) {
+  try { return await simulateContractCall(poolContractId, "get_config"); }
+  catch (e) { return null; }
+}
+
+async function getUserPositions(poolContractId, userAddress) {
   try {
     const userScVal = new Address(userAddress).toScVal();
-    const result = await simulateContractCall(poolContractId, "get_positions", [userScVal]);
-    if (!result) return null;
-    return scValToNative(result);
-  } catch (e) {
-    // User may have no positions — that's normal
-    if (e.message?.includes("not found") || e.message?.includes("Simulation failed")) {
-      return null;
-    }
-    console.error(`[Blend] get_positions error:`, e.message);
-    return null;
-  }
+    return await simulateContractCall(poolContractId, "get_positions", [userScVal]);
+  } catch (e) { return null; }
 }
 
 /**
- * Get pool configuration.
+ * Get pending BLND emissions for a user on a specific reserve/type combo.
+ * reserve_token_index encoding (per Blend docs):
+ *   index * 2     = bToken (suppliers) for that reserve
+ *   index * 2 + 1 = dToken (borrowers) for that reserve
  */
-async function getPoolConfig(poolContractId) {
+async function getUserEmissions(poolContractId, userAddress, reserveTokenIndex) {
   try {
-    const result = await simulateContractCall(poolContractId, "get_config");
-    if (!result) return null;
-    return scValToNative(result);
-  } catch (e) {
-    console.error(`[Blend] get_config error:`, e.message);
-    return null;
-  }
+    const userScVal = new Address(userAddress).toScVal();
+    const indexScVal = nativeToScVal(reserveTokenIndex, { type: "u32" });
+    const result = await simulateContractCall(poolContractId, "get_user_emissions",
+      [userScVal, indexScVal]);
+    if (result == null) return 0n;
+    if (typeof result === "bigint") return result;
+    if (typeof result === "object" && result.accrued != null) return BigInt(result.accrued);
+    if (typeof result === "object" && result.amount != null) return BigInt(result.amount);
+    return 0n;
+  } catch (e) { return 0n; }
 }
 
-// ── Position Resolution ──────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Conversions
+// ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Convert protocol token amount (bTokens/dTokens) to underlying asset amount.
- *
- * Two distinct decimal concepts are at play here:
- *
- *   1. The asset's own decimals — XLM=7, USDC=7, SolvBTC=8, Centrifuge=18, etc.
- *      This describes how the token represents 1 unit of itself on-chain
- *      and is per-token, not per-protocol. Comes in via the `decimals`
- *      argument and ultimately from the token universe / token contract.
- *
- *   2. Blend's internal rate scalar — a Blend V2 protocol invariant,
- *      fixed at 12 decimals. b_rate and d_rate are stored as fixed-point
- *      integers scaled by 10^12. This is *not* configurable per pool or
- *      per asset; it's a property of how Blend V2 tracks interest accrual,
- *      established at protocol design time.
- *
- * Don't confuse the two. Other protocols use entirely different internal
- * scalars (SushiSwap V3 uses sqrtPriceX96 / Q96 = 2^96, Aave-style protocols
- * commonly use 27-decimal "ray" math) — each adapter encodes its own
- * protocol's scalar without inheriting from a shared constant.
- *
- * Verified empirically: with this scalar, the test wallet's positions of
- * 8 XLM / 10 USDC supplied and 3 USDC borrowed are read correctly. With
- * a 10^9 scalar (a prior guess based on Blend V1 conventions) the numbers
- * came back exactly 1000× too high — the smoking gun that V2 uses 12, not 9.
- */
-const BLEND_V2_RATE_SCALAR_DECIMALS = 12;
+function fromScalar7(raw) {
+  if (raw == null) return 0;
+  try { return Number(BigInt(raw)) / SCALAR_7; }
+  catch (e) { return Number(raw) / SCALAR_7; }
+}
 
 function protocolToUnderlying(protocolAmount, rate, decimals = 7) {
   if (!rate || !protocolAmount) return 0;
-  // underlying_raw = protocolAmount × rate / 10^BLEND_V2_RATE_SCALAR_DECIMALS
-  // underlying     = underlying_raw / 10^decimals
   try {
     const amount = BigInt(protocolAmount);
     const rateVal = BigInt(rate);
@@ -167,21 +177,94 @@ function protocolToUnderlying(protocolAmount, rate, decimals = 7) {
     const underlying = (amount * rateVal) / scaleFactor;
     return Number(underlying) / (10 ** decimals);
   } catch (e) {
-    // Fallback for non-BigInt values
-    return (Number(protocolAmount) * Number(rate)) / (10 ** BLEND_V2_RATE_SCALAR_DECIMALS) / (10 ** decimals);
+    return (Number(protocolAmount) * Number(rate)) /
+      (10 ** BLEND_V2_RATE_SCALAR_DECIMALS) / (10 ** decimals);
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Interest rate / APY math
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
- * Resolve metadata (symbol + decimals) for an asset, with the same
- * universe-first / RPC-fallback pattern used elsewhere in the codebase
- * (see contract-discovery.js for prior art). Returns { symbol, decimals }.
+ * Compute current borrow APR using Blend's three-slope piecewise-linear model
+ * (whitepaper section "Interest Rate Model"):
  *
- * Why universe-first: Soroban RPC metadata calls can fail (rate-limit,
- * transient errors). For well-known assets we already know the decimals,
- * and using the wrong decimals corrupts the underlying-amount calculation
- * — which we learned the hard way with SolvBTC on the discovery side.
+ *   IR(U) = RM * (R_base + (U/U_t) * R_1)                          if U ≤ U_t
+ *           RM * (R_base + R_1 + ((U-U_t)/(0.95-U_t)) * R_2)       if U_t < U ≤ 0.95
+ *           (R_base + R_1 + R_2) + ((U-0.95)/0.05) * R_3           if U > 0.95
+ *
+ * Inputs are plain JS numbers (post-scaling). Returns APR as fraction.
  */
+function computeBorrowApr({ r_base, r_one, r_two, r_three, util_target, ir_mod, utilization }) {
+  if (!Number.isFinite(utilization)) return 0;
+  const U = Math.max(0, Math.min(1, utilization));
+  const U_t = Math.max(0.0001, Math.min(0.9499, util_target));
+  const RM = ir_mod > 0 ? ir_mod : 1;
+
+  if (U <= U_t) {
+    return RM * (r_base + (U / U_t) * r_one);
+  } else if (U <= 0.95) {
+    return RM * (r_base + r_one + ((U - U_t) / (0.95 - U_t)) * r_two);
+  } else {
+    return (r_base + r_one + r_two) + ((U - 0.95) / 0.05) * r_three;
+  }
+}
+
+function computeSupplyApr({ borrowApr, utilization, backstopTakeRate }) {
+  return borrowApr * utilization * (1 - (backstopTakeRate || 0));
+}
+
+function aprToApy(apr) {
+  if (!Number.isFinite(apr) || apr === 0) return 0;
+  return Math.pow(1 + apr / 365, 365) - 1;
+}
+
+function _extractReserveRateParams(reserveData) {
+  const inner = reserveData?.data || reserveData || {};
+  const cfg = reserveData?.config || reserveData?.Config || inner.config || {};
+
+  return {
+    r_base:      fromScalar7(cfg.r_base      ?? cfg.rBase      ?? 0),
+    r_one:       fromScalar7(cfg.r_one       ?? cfg.rOne       ?? 0),
+    r_two:       fromScalar7(cfg.r_two       ?? cfg.rTwo       ?? 0),
+    r_three:     fromScalar7(cfg.r_three     ?? cfg.rThree     ?? 0),
+    util_target: fromScalar7(cfg.util        ?? cfg.targetUtil ?? 0),
+    ir_mod: Number(BigInt(inner.ir_mod ?? inner.irMod ?? 1000000000n)) / BLEND_IR_MOD_SCALAR,
+  };
+}
+
+/**
+ * Compute current pool utilization for a single reserve.
+ * U = total borrowed / total supplied
+ *   = (d_supply * d_rate) / (b_supply * b_rate)
+ * Both rates are in the same 12-decimal scale, so they don't cancel — the
+ * d_rate may be slightly higher than b_rate (debt grows faster) but both
+ * scale factors do divide cleanly when computed as a Number ratio.
+ */
+function _computeUtilization(reserveData) {
+  const inner = reserveData?.data || reserveData || {};
+  try {
+    const bSupply = BigInt(inner.b_supply ?? inner.bSupply ?? 0);
+    const dSupply = BigInt(inner.d_supply ?? inner.dSupply ?? 0);
+    const bRate = BigInt(inner.b_rate ?? inner.bRate ?? 0);
+    const dRate = BigInt(inner.d_rate ?? inner.dRate ?? 0);
+
+    if (bSupply === 0n || bRate === 0n) return 0;
+    const supplied = bSupply * bRate;
+    const borrowed = dSupply * dRate;
+    if (supplied === 0n) return 0;
+    const ratio = Number((borrowed * 1000000n) / supplied) / 1000000;
+    return Math.max(0, Math.min(1, ratio));
+  } catch (e) {
+    return 0;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Metadata resolution
+// ─────────────────────────────────────────────────────────────────────────────
+
 async function _resolveAssetMetadata(assetAddress) {
   let symbol = null;
   let decimals = null;
@@ -198,7 +281,6 @@ async function _resolveAssetMetadata(assetAddress) {
       if (meta) {
         if (decimals == null) decimals = meta.decimals;
         if (!symbol) symbol = meta.symbol;
-        // Cache what we learned for next time
         try {
           tokenUniverse.add(assetAddress, { symbol, decimals, source: "blend-discovered" });
         } catch (_) {}
@@ -211,155 +293,218 @@ async function _resolveAssetMetadata(assetAddress) {
   return { symbol, decimals };
 }
 
-/**
- * Build a single position object and enrich it with the current USD price.
- * For borrow positions (subtype === "liability"), the returned valueUSD is
- * negative — this correctly represents debt against total net worth.
- */
-async function _buildEnrichedPosition({
-  pool,
-  positionType,
-  subtype,
-  reserveIndex,
-  assetAddress,
-  protocolTokenAmount,
-  reserveData,
+// ─────────────────────────────────────────────────────────────────────────────
+// Position row building
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function _buildReserveRow({
+  pool, reserveIndex, assetAddress, reserveData, poolConfig, userPositions, userAddress,
 }) {
   const { symbol, decimals } = await _resolveAssetMetadata(assetAddress);
 
-  // Borrow uses d_rate; supply/collateral uses b_rate.
-  // These live inside reserveData.data (a sub-struct) per Blend V2's
-  // ReserveV2 layout — `reserveData.data.b_rate` not `reserveData.b_rate`.
-  // The serde wrappers may also expose camelCase variants, so we tolerate both.
-  const reserveDataInner = reserveData?.data || reserveData || {};
-  const rate = subtype === "liability"
-    ? (reserveDataInner.d_rate ?? reserveDataInner.dRate)
-    : (reserveDataInner.b_rate ?? reserveDataInner.bRate);
+  const inner = reserveData?.data || reserveData || {};
+  const bRate = inner.b_rate ?? inner.bRate;
+  const dRate = inner.d_rate ?? inner.dRate;
 
-  const underlyingAmount = protocolToUnderlying(protocolTokenAmount, rate, decimals);
+  const collat = (userPositions.collateral || userPositions.Collateral || {})[reserveIndex] || 0n;
+  const supply = (userPositions.supply || userPositions.Supply || {})[reserveIndex] || 0n;
+  const liab   = (userPositions.liabilities || userPositions.Liabilities || {})[reserveIndex] || 0n;
 
-  // Future canary: if Blend ever changes the reserve struct layout or
-  // rate-scalar convention, this warning will surface in server logs
-  // immediately rather than silently corrupting numbers.
-  if (
-    underlyingAmount === 0 &&
-    protocolTokenAmount &&
-    BigInt(protocolTokenAmount) > 0n
-  ) {
+  const collatBig = BigInt(collat);
+  const supplyBig = BigInt(supply);
+  const liabBig = BigInt(liab);
+
+  const totalSuppliedBToken = collatBig + supplyBig;
+  const suppliedUnderlying = protocolToUnderlying(totalSuppliedBToken, bRate, decimals);
+  const borrowedUnderlying = protocolToUnderlying(liabBig, dRate, decimals);
+
+  if ((totalSuppliedBToken > 0n && suppliedUnderlying === 0) ||
+      (liabBig > 0n && borrowedUnderlying === 0)) {
     console.warn(
-      `[Blend] underlyingAmount=0 from non-zero protocolTokens — possible struct/scalar change. ` +
+      `[Blend] underlying=0 from non-zero protocolTokens — possible struct/scalar change. ` +
         `pool=${pool.contractId.slice(0, 10)} asset=${assetAddress.slice(0, 10)} ` +
-        `subtype=${subtype} protocolTokens=${protocolTokenAmount.toString()} ` +
-        `rate=${rate ?? "(missing)"} decimals=${decimals} ` +
-        `reserveDataKeys=${Object.keys(reserveData || {}).join(",")} ` +
-        `dataKeys=${Object.keys((reserveData || {}).data || {}).join(",")}`
+        `bSupplied=${totalSuppliedBToken} bRate=${bRate} dLiab=${liabBig} dRate=${dRate}`
     );
   }
 
-  // Price the underlying asset and compute USD value. For liabilities, the
-  // value is the negative of the priced amount so that summing across all
-  // positions yields the correct net-of-debt portfolio total.
-  let valueUSD = 0;
+  // Reserve-level metrics
+  const rateParams = _extractReserveRateParams(reserveData);
+  const utilization = _computeUtilization(reserveData);
+  const backstopTakeRate = fromScalar7(
+    poolConfig?.bstop_rate ?? poolConfig?.backstopRate ?? poolConfig?.bstopRate ?? 0
+  );
+
+  const borrowApr = computeBorrowApr({ ...rateParams, utilization });
+  const supplyApr = computeSupplyApr({ borrowApr, utilization, backstopTakeRate });
+  const borrowApy = aprToApy(borrowApr);
+  const supplyApy = aprToApy(supplyApr);
+
+  if (Math.abs(borrowApy) > 10 || Math.abs(supplyApy) > 10) {
+    console.warn(
+      `[Blend] suspicious APY: borrow=${borrowApy} supply=${supplyApy} ` +
+        `pool=${pool.contractId.slice(0, 10)} asset=${assetAddress.slice(0, 10)} ` +
+        `util=${utilization} params=${JSON.stringify(rateParams)} ` +
+        `backstopTakeRate=${backstopTakeRate}`
+    );
+  }
+
+  // Price
   let price = null;
+  try { price = await priceSorobanToken(assetAddress, { decimals }); } catch (_) {}
+  const priceUsd = price?.usd || 0;
+  const suppliedUSD = suppliedUnderlying * priceUsd;
+  const borrowedUSD = borrowedUnderlying * priceUsd;
+
+  // Pending BLND emissions (best-effort)
+  let pendingEmissions = 0n;
   try {
-    price = await priceSorobanToken(assetAddress, { decimals });
-    if (price && Number.isFinite(underlyingAmount)) {
-      valueUSD = underlyingAmount * price.usd;
-      if (subtype === "liability") valueUSD = -valueUSD;
+    if (totalSuppliedBToken > 0n) {
+      pendingEmissions += await getUserEmissions(pool.contractId, userAddress, reserveIndex * 2);
+    }
+    if (liabBig > 0n) {
+      pendingEmissions += await getUserEmissions(pool.contractId, userAddress, reserveIndex * 2 + 1);
     }
   } catch (_) {}
+  const pendingBlnd = Number(pendingEmissions) / SCALAR_7;
 
   return {
-    protocol: "blend",
-    type: positionType,
-    subtype,
-    poolContractId: pool.contractId,
-    poolName: pool.name || "Blend Pool",
-    assetAddress,
-    asset: symbol,
-    decimals,
-    protocolTokens: protocolTokenAmount.toString(),
-    underlyingAmount,
-    reserveIndex: Number(reserveIndex),
-    valueUSD,
+    reserveIndex, asset: symbol, assetAddress, decimals,
+    supplied: suppliedUnderlying,
+    suppliedUSD,
+    supplyApy,
+    borrowed: borrowedUnderlying,
+    borrowedUSD,
+    borrowApy,
+    netUSD: suppliedUSD - borrowedUSD,
     price: price ? { usd: price.usd, source: price.source } : null,
+    utilization,
+    pendingBlnd,
   };
 }
 
-/**
- * Resolve all positions for a user across all configured Blend pools.
- */
-async function resolveUserPositions(userAddress) {
-  const pools = getAllPools();
-  const positions = [];
+async function _resolveUserPositionsInPool(pool, userAddress) {
+  const reserveList = await getReserveList(pool.contractId);
+  if (!reserveList || reserveList.length === 0) return null;
 
+  const userPositions = await getUserPositions(pool.contractId, userAddress);
+  if (!userPositions) return null;
+
+  const poolConfig = await getPoolConfig(pool.contractId);
+
+  const rows = [];
+  for (let i = 0; i < reserveList.length; i++) {
+    const assetAddress = reserveList[i];
+    const collat = (userPositions.collateral || userPositions.Collateral || {})[i] || 0n;
+    const supply = (userPositions.supply || userPositions.Supply || {})[i] || 0n;
+    const liab   = (userPositions.liabilities || userPositions.Liabilities || {})[i] || 0n;
+
+    if (BigInt(collat) === 0n && BigInt(supply) === 0n && BigInt(liab) === 0n) continue;
+
+    const reserveData = await getReserve(pool.contractId, assetAddress);
+    if (!reserveData) continue;
+
+    const row = await _buildReserveRow({
+      pool, reserveIndex: i, assetAddress, reserveData, poolConfig, userPositions, userAddress,
+    });
+    rows.push(row);
+  }
+
+  if (rows.length === 0) return null;
+
+  const totalSuppliedUSD = rows.reduce((s, r) => s + r.suppliedUSD, 0);
+  const totalBorrowedUSD = rows.reduce((s, r) => s + r.borrowedUSD, 0);
+
+  return {
+    poolContractId: pool.contractId,
+    poolName: pool.name || `Blend Pool (${pool.contractId.slice(0, 6)}…)`,
+    rows,
+    totalSuppliedUSD,
+    totalBorrowedUSD,
+    netUSD: totalSuppliedUSD - totalBorrowedUSD,
+    debtRatio: totalSuppliedUSD > 0 ? totalBorrowedUSD / totalSuppliedUSD : 0,
+    totalPendingBlnd: rows.reduce((s, r) => s + r.pendingBlnd, 0),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Flattening for legacy server.js compatibility
+// ─────────────────────────────────────────────────────────────────────────────
+
+function _flattenPoolGroup(group) {
+  const flat = [];
+  for (const r of group.rows) {
+    if (r.suppliedUSD !== 0) {
+      flat.push({
+        protocol: "blend",
+        type: "lending",
+        subtype: "collateral",
+        poolContractId: group.poolContractId,
+        poolName: group.poolName,
+        asset: r.asset,
+        assetAddress: r.assetAddress,
+        decimals: r.decimals,
+        underlyingAmount: r.supplied,
+        valueUSD: r.suppliedUSD,
+        apy: r.supplyApy,
+        price: r.price,
+      });
+    }
+    if (r.borrowedUSD !== 0) {
+      flat.push({
+        protocol: "blend",
+        type: "borrowing",
+        subtype: "liability",
+        poolContractId: group.poolContractId,
+        poolName: group.poolName,
+        asset: r.asset,
+        assetAddress: r.assetAddress,
+        decimals: r.decimals,
+        underlyingAmount: r.borrowed,
+        valueUSD: -r.borrowedUSD,
+        apy: r.borrowApy,
+        price: r.price,
+      });
+    }
+  }
+  return flat;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public API
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function getPositions(userAddress) {
+  _refreshFactoryPools().catch(() => {});
+
+  const pools = getConfiguredPools();
+  if (pools.length === 0) return [];
+
+  const groups = [];
   for (const pool of pools) {
     try {
-      const userPositions = await getPositions(pool.contractId, userAddress);
-      if (!userPositions) continue;
-
-      const reserveList = await getReserveList(pool.contractId);
-      if (!reserveList || reserveList.length === 0) continue;
-
-      // Position kinds we care about. Each entry is:
-      // { mapKeys: [variants], positionType, subtype }
-      const positionKinds = [
-        { mapKeys: ["collateral", "Collateral"], positionType: "lending",   subtype: "collateral" },
-        { mapKeys: ["supply",     "Supply"],     positionType: "lending",   subtype: "supply" },
-        { mapKeys: ["liabilities","Liabilities"],positionType: "borrowing", subtype: "liability" },
-      ];
-
-      for (const kind of positionKinds) {
-        const map = kind.mapKeys.reduce(
-          (acc, k) => acc || userPositions[k],
-          null
-        ) || new Map();
-
-        for (const [reserveIndex, protocolTokenAmount] of Object.entries(map)) {
-          if (!protocolTokenAmount || BigInt(protocolTokenAmount) === 0n) continue;
-
-          const assetAddress = reserveList[Number(reserveIndex)];
-          if (!assetAddress) continue;
-
-          const reserveData = await getReserve(pool.contractId, assetAddress);
-          const position = await _buildEnrichedPosition({
-            pool,
-            positionType: kind.positionType,
-            subtype: kind.subtype,
-            reserveIndex,
-            assetAddress,
-            protocolTokenAmount,
-            reserveData,
-          });
-          positions.push(position);
-        }
-      }
+      const group = await _resolveUserPositionsInPool(pool, userAddress);
+      if (group) groups.push(group);
     } catch (e) {
-      console.error(`[Blend] Error resolving positions for pool ${pool.contractId}:`, e.message);
+      console.error(`[Blend] Failed to resolve pool ${pool.contractId}: ${e.message}`);
     }
   }
 
-  return positions;
+  const flat = [];
+  for (const g of groups) flat.push(..._flattenPoolGroup(g));
+  // Attach grouped data alongside the flat array for frontend table rendering
+  flat.__blendPoolGroups = groups;
+  return flat;
 }
 
-// ── Adapter Interface ────────────────────────────────────────────────────────
+function isConfigured() {
+  return getConfiguredPools().length > 0;
+}
 
 const BlendAdapter = {
-  protocolId: "blend",
   name: "Blend Protocol",
-  type: "lending",
-
-  isConfigured() {
-    return getAllPools().length > 0;
-  },
-
-  /**
-   * Get all Blend Protocol positions for a user.
-   */
-  async getPositions(userAddress) {
-    if (!this.isConfigured()) return [];
-    return resolveUserPositions(userAddress);
-  },
+  protocol: "blend",
+  isConfigured,
+  getPositions,
 };
 
 module.exports = BlendAdapter;
