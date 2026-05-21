@@ -277,6 +277,7 @@ app.get("/api/v1/account/:address", async (req, res) => {
 
     // ── DeFi positions (SushiSwap V3, Solv vaults, etc.) ─────────────────
     const defiPositions = [];
+    const defiByPool = []; // grouped data, currently from Blend; future adapters may add
     for (const adapter of PROTOCOL_ADAPTERS) {
       if (!adapter.isConfigured()) continue;
       try {
@@ -284,6 +285,14 @@ app.get("/api/v1/account/:address", async (req, res) => {
         for (const pos of positions) {
           totalValueUSD += pos.valueUSD || 0;
           defiPositions.push(pos);
+        }
+        // Blend (and any future adapter) may attach grouped pool data to
+        // the array via the __blendPoolGroups property. Pass these through
+        // to the frontend so it can render the DeBank-style per-pool table.
+        if (Array.isArray(positions.__blendPoolGroups)) {
+          for (const g of positions.__blendPoolGroups) {
+            defiByPool.push({ protocol: "blend", ...g });
+          }
         }
       } catch (e) {
         console.error(`${adapter.name} adapter error:`, e.message);
@@ -301,6 +310,7 @@ app.get("/api/v1/account/:address", async (req, res) => {
       balanceCount: balances.length,
       balances,
       defiPositions,
+      defiByPool,
       defiProtocols: PROTOCOL_ADAPTERS.filter((a) => a.isConfigured()).map((a) => ({
         id: a.protocolId,
         name: a.name,

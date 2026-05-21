@@ -17,7 +17,6 @@
     } catch (e) {}
   </script>
   <title>Stellar Scope</title>
-  <link rel="stylesheet" href="/mobile.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/stellar-freighter-api/2.0.0/index.min.js"></script>
   <style>
     /* Dark theme (default) and light theme.
@@ -981,6 +980,90 @@
     .defi-type-badge.vault { background: rgba(34,197,94,0.15); color: var(--green); }
     .defi-type-badge.staking { background: rgba(234,179,8,0.15); color: var(--yellow); }
     .defi-type-badge.lp { background: rgba(59,130,246,0.15); color: var(--blue); }
+    .defi-type-badge.lending { background: rgba(16,185,129,0.15); color: var(--green); }
+
+    /* ── DeFi summary card (net position across all protocols) ────────────── */
+    .defi-summary {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 16px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 16px;
+    }
+
+    .defi-summary-stat {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .defi-summary-stat .label {
+      font-size: 11px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      letter-spacing: 0.3px;
+      margin-bottom: 4px;
+    }
+
+    .defi-summary-stat .value {
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .defi-summary-stat .value.negative { color: var(--red); }
+    .defi-summary-stat .value.positive { color: var(--green); }
+
+    /* ── Pool table (DeBank-style Supply/Borrow per pool) ────────────────── */
+    .defi-pool-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .defi-pool-table th {
+      text-align: left;
+      padding: 8px 12px;
+      font-size: 11px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      font-weight: 500;
+      letter-spacing: 0.3px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .defi-pool-table th.right { text-align: right; }
+
+    .defi-pool-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .defi-pool-table tr:last-child td { border-bottom: none; }
+
+    .defi-pool-table td.right { text-align: right; }
+    .defi-pool-table .muted { color: var(--text-muted); font-size: 11px; }
+    .defi-pool-table .negative { color: var(--red); }
+
+    .defi-pool-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 12px 0;
+      font-size: 12px;
+      color: var(--text-muted);
+      border-top: 1px solid var(--border);
+      margin-top: 8px;
+    }
+
+    .defi-pool-footer .emission-pill {
+      background: rgba(16,185,129,0.15);
+      color: var(--green);
+      padding: 3px 10px;
+      border-radius: 12px;
+      font-weight: 600;
+    }
 
     .defi-details {
       display: grid;
@@ -3257,8 +3340,9 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
     // ── Render DeFi Positions ─────────────────────────────────
     function renderDefi(container) {
       const positions = currentData.defiPositions || [];
+      const byPool = currentData.defiByPool || [];
 
-      if (positions.length === 0) {
+      if (positions.length === 0 && byPool.length === 0) {
         const protocols = currentData.defiProtocols || [];
         const configuredMsg = protocols.length > 0
           ? `<div style="margin-top:8px; font-size:13px">Tracking: ${protocols.map(p => p.name).join(", ")}</div>`
@@ -3270,14 +3354,131 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         return;
       }
 
+      // ── Summary card across all DeFi positions ────────────────────────
+      const totalSupplied = byPool.reduce((s, p) => s + (p.totalSuppliedUSD || 0), 0);
+      const totalBorrowed = byPool.reduce((s, p) => s + (p.totalBorrowedUSD || 0), 0);
+      const netDefiUSD = totalSupplied - totalBorrowed;
+      const totalPendingBlnd = byPool.reduce((s, p) => s + (p.totalPendingBlnd || 0), 0);
+      const nonBlendValueUSD = positions
+        .filter(p => p.protocol !== "blend")
+        .reduce((s, p) => s + (p.valueUSD || 0), 0);
+      const netDefiTotal = netDefiUSD + nonBlendValueUSD;
+
       let html = "";
-      positions.forEach((pos) => {
+
+      // Only show the summary if there's at least one Blend pool; otherwise
+      // it's redundant with the existing single-protocol cards.
+      if (byPool.length > 0) {
+        html += `<div class="defi-summary">`;
+        html += `<div class="defi-summary-stat"><div class="label">Supplied</div><div class="value">${fmtUSD(totalSupplied)}</div></div>`;
+        html += `<div class="defi-summary-stat"><div class="label">Borrowed</div><div class="value">${fmtUSD(totalBorrowed)}</div></div>`;
+        html += `<div class="defi-summary-stat"><div class="label">Net DeFi</div><div class="value ${netDefiTotal < 0 ? "negative" : "positive"}">${fmtUSD(netDefiTotal)}</div></div>`;
+        if (totalPendingBlnd > 0) {
+          html += `<div class="defi-summary-stat"><div class="label">Pending BLND</div><div class="value">${fmt(totalPendingBlnd, 4)}</div></div>`;
+        }
+        html += `</div>`;
+      }
+
+      // ── Blend per-pool tables ──────────────────────────────────────────
+      for (const group of byPool) {
+        const protocolLabel = group.protocol === "blend" ? "Blend Protocol" : group.protocol;
+        const protocolIcon = group.protocol === "blend" ? "blend" : "default";
+        const debtRatioPct = (group.debtRatio || 0) * 100;
+        const debtRatioColor = debtRatioPct > 75 ? "color:var(--red)"
+          : debtRatioPct > 50 ? "color:var(--yellow)" : "";
+
+        html += `<div class="defi-card">`;
+        html += `<div class="defi-card-header">`;
+        html += `<div class="defi-protocol">`;
+        html += `<div class="defi-protocol-icon ${protocolIcon}">${protocolLabel.slice(0, 2)}</div>`;
+        html += `<div>`;
+        html += `<div style="font-weight:600">${protocolLabel}</div>`;
+        html += `<div style="font-size:12px; color:var(--text-muted)">${group.poolName}</div>`;
+        html += `</div>`;
+        html += `</div>`;
+        html += `<div style="text-align:right">`;
+        html += `<div style="font-size:11px; color:var(--text-muted); text-transform:uppercase">Net</div>`;
+        html += `<div style="font-weight:700; ${group.netUSD < 0 ? "color:var(--red)" : ""}">${fmtUSD(group.netUSD)}</div>`;
+        html += `</div>`;
+        html += `</div>`;
+
+        // Table of reserves
+        html += `<table class="defi-pool-table">`;
+        html += `<thead><tr>`;
+        html += `<th>Asset</th>`;
+        html += `<th class="right">Supply</th>`;
+        html += `<th class="right">Borrow</th>`;
+        html += `<th class="right">Supply APY</th>`;
+        html += `<th class="right">Borrow APY</th>`;
+        html += `<th class="right">Value</th>`;
+        html += `</tr></thead><tbody>`;
+
+        for (const row of group.rows) {
+          html += `<tr>`;
+          html += `<td><strong>${row.asset}</strong></td>`;
+
+          html += `<td class="right">`;
+          if (row.supplied > 0) {
+            html += `${fmt(row.supplied, 4)} ${row.asset}<br><span class="muted">${fmtUSD(row.suppliedUSD)}</span>`;
+          } else {
+            html += `<span class="muted">—</span>`;
+          }
+          html += `</td>`;
+
+          html += `<td class="right">`;
+          if (row.borrowed > 0) {
+            html += `<span class="negative">${fmt(row.borrowed, 4)} ${row.asset}</span><br><span class="muted">${fmtUSD(row.borrowedUSD)}</span>`;
+          } else {
+            html += `<span class="muted">—</span>`;
+          }
+          html += `</td>`;
+
+          html += `<td class="right">`;
+          if (row.supplied > 0 && Number.isFinite(row.supplyApy)) {
+            html += `~${fmt(row.supplyApy * 100, 2)}%`;
+          } else {
+            html += `<span class="muted">—</span>`;
+          }
+          html += `</td>`;
+
+          html += `<td class="right">`;
+          if (row.borrowed > 0 && Number.isFinite(row.borrowApy)) {
+            html += `~${fmt(row.borrowApy * 100, 2)}%`;
+          } else {
+            html += `<span class="muted">—</span>`;
+          }
+          html += `</td>`;
+
+          html += `<td class="right ${row.netUSD < 0 ? "negative" : ""}">${fmtUSD(row.netUSD)}</td>`;
+          html += `</tr>`;
+        }
+        html += `</tbody></table>`;
+
+        const footerLeft = [];
+        if (group.totalBorrowedUSD > 0) {
+          footerLeft.push(`<span>Debt ratio: <strong style="${debtRatioColor}">${fmt(debtRatioPct, 1)}%</strong></span>`);
+        }
+        const footerRight = [];
+        if (group.totalPendingBlnd > 0) {
+          footerRight.push(`<span class="emission-pill">+${fmt(group.totalPendingBlnd, 4)} BLND pending</span>`);
+        }
+        if (footerLeft.length > 0 || footerRight.length > 0) {
+          html += `<div class="defi-pool-footer">`;
+          html += `<div>${footerLeft.join(" · ")}</div>`;
+          html += `<div>${footerRight.join(" ")}</div>`;
+          html += `</div>`;
+        }
+
+        html += `</div>`;
+      }
+
+      // ── Non-Blend positions (SushiSwap, Solv, etc.) ────────────────────
+      const otherPositions = positions.filter(p => p.protocol !== "blend");
+      otherPositions.forEach((pos) => {
         const protocolIcon = pos.protocol === "sushiswap-v3" ? "sushi"
-          : pos.protocol === "solv-protocol" ? "solv"
-          : pos.protocol === "blend" ? "blend" : "default";
+          : pos.protocol === "solv-protocol" ? "solv" : "default";
         const protocolLabel = pos.protocol === "sushiswap-v3" ? "SushiSwap V3"
-          : pos.protocol === "solv-protocol" ? "Solv Protocol"
-          : pos.protocol === "blend" ? "Blend Protocol" : pos.protocol;
+          : pos.protocol === "solv-protocol" ? "Solv Protocol" : pos.protocol;
         const typeLabel = pos.type.replace(/_/g, " ");
 
         html += `<div class="defi-card">`;
@@ -3290,16 +3491,10 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
           html += `<div style="font-size:12px; color:var(--text-muted)">${pos.token0.symbol} / ${pos.token1.symbol}`;
           if (pos.feeTier) html += ` (${pos.feeTier / 10000}%)`;
           html += `</div>`;
-        } else if (pos.protocol === "blend") {
-          // Blend positions: show "<Pool name> · <asset> <subtype>"
-          const subtypeLabel = pos.subtype === "liability" ? "borrowed"
-            : pos.subtype === "collateral" ? "supplied (collateral)"
-            : "supplied";
-          html += `<div style="font-size:12px; color:var(--text-muted)">${pos.poolName || "Blend Pool"} · ${pos.asset} ${subtypeLabel}</div>`;
         }
         html += `</div></div>`;
         html += `<div class="defi-type-badge ${pos.type}">${typeLabel}</div>`;
-        html += `</div>`; // header
+        html += `</div>`;
 
         html += `<div class="defi-details">`;
 
@@ -3365,39 +3560,6 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
               <div class="defi-detail-value">${fmt(pos.shareOfPool * 100, 4)}%</div>
             </div>
           `;
-        } else if (pos.type === "lending") {
-          // Blend Protocol supply/collateral position
-          const subtypeLabel = pos.subtype === "collateral" ? "Collateral" : "Supplied";
-          html += `
-            <div class="defi-detail-item">
-              <div class="defi-detail-label">${subtypeLabel}</div>
-              <div class="defi-detail-value">${fmt(pos.underlyingAmount, 4)} ${pos.asset}</div>
-            </div>
-          `;
-          if (pos.price && pos.price.usd) {
-            html += `
-              <div class="defi-detail-item">
-                <div class="defi-detail-label">Price</div>
-                <div class="defi-detail-value">${fmtUSD(pos.price.usd)}</div>
-              </div>
-            `;
-          }
-        } else if (pos.type === "borrowing") {
-          // Blend Protocol borrow position — debt, shown with a negative value
-          html += `
-            <div class="defi-detail-item">
-              <div class="defi-detail-label">Borrowed</div>
-              <div class="defi-detail-value" style="color:var(--red)">${fmt(pos.underlyingAmount, 4)} ${pos.asset}</div>
-            </div>
-          `;
-          if (pos.price && pos.price.usd) {
-            html += `
-              <div class="defi-detail-item">
-                <div class="defi-detail-label">Price</div>
-                <div class="defi-detail-value">${fmtUSD(pos.price.usd)}</div>
-              </div>
-            `;
-          }
         }
 
         if (pos.valueUSD !== 0 && pos.valueUSD != null) {
@@ -3411,8 +3573,8 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
           `;
         }
 
-        html += `</div>`; // details
-        html += `</div>`; // card
+        html += `</div>`;
+        html += `</div>`;
       });
 
       container.innerHTML = html;
