@@ -1065,6 +1065,17 @@
       font-weight: 600;
     }
 
+    .defi-pool-table .emission-apy {
+      display: inline-block;
+      background: rgba(16,185,129,0.15);
+      color: var(--green);
+      padding: 1px 6px;
+      border-radius: 8px;
+      font-size: 11px;
+      font-weight: 600;
+      margin-top: 2px;
+    }
+
     .defi-details {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -3436,6 +3447,9 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
           html += `<td class="right">`;
           if (row.supplied > 0 && Number.isFinite(row.supplyApy)) {
             html += `~${fmt(row.supplyApy * 100, 2)}%`;
+            if (Number.isFinite(row.supplyEmissionApy) && row.supplyEmissionApy > 0) {
+              html += `<br><span class="emission-apy">+${fmt(row.supplyEmissionApy * 100, 2)}%</span>`;
+            }
           } else {
             html += `<span class="muted">—</span>`;
           }
@@ -3444,6 +3458,9 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
           html += `<td class="right">`;
           if (row.borrowed > 0 && Number.isFinite(row.borrowApy)) {
             html += `~${fmt(row.borrowApy * 100, 2)}%`;
+            if (Number.isFinite(row.borrowEmissionApy) && row.borrowEmissionApy > 0) {
+              html += `<br><span class="emission-apy">+${fmt(row.borrowEmissionApy * 100, 2)}%</span>`;
+            }
           } else {
             html += `<span class="muted">—</span>`;
           }
@@ -3476,9 +3493,15 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
       const otherPositions = positions.filter(p => p.protocol !== "blend");
       otherPositions.forEach((pos) => {
         const protocolIcon = pos.protocol === "sushiswap-v3" ? "sushi"
-          : pos.protocol === "solv-protocol" ? "solv" : "default";
+          : pos.protocol === "solv-protocol" ? "solv"
+          : pos.protocol === "sdex" ? "sdex"
+          : pos.protocol === "aquarius" ? "aquarius"
+          : pos.protocol === "templar" ? "templar" : "default";
         const protocolLabel = pos.protocol === "sushiswap-v3" ? "SushiSwap V3"
-          : pos.protocol === "solv-protocol" ? "Solv Protocol" : pos.protocol;
+          : pos.protocol === "solv-protocol" ? "Solv Protocol"
+          : pos.protocol === "sdex" ? "SDEX"
+          : pos.protocol === "aquarius" ? "Aquarius"
+          : pos.protocol === "templar" ? "Templar" : pos.protocol;
         const typeLabel = pos.type.replace(/_/g, " ");
 
         html += `<div class="defi-card">`;
@@ -3498,7 +3521,38 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
 
         html += `<div class="defi-details">`;
 
-        if (pos.type === "concentrated_lp") {
+        if (pos.type === "limit_order") {
+          html += `
+            <div class="defi-detail-item">
+              <div class="defi-detail-label">Selling</div>
+              <div class="defi-detail-value">${fmt(pos.sellingAmount, 4)} ${pos.sellingAsset}</div>
+            </div>
+            <div class="defi-detail-item">
+              <div class="defi-detail-label">Buying</div>
+              <div class="defi-detail-value">${pos.buyingAsset}</div>
+            </div>
+            <div class="defi-detail-item">
+              <div class="defi-detail-label">Price</div>
+              <div class="defi-detail-value">${fmt(pos.price, 6)}</div>
+            </div>
+          `;
+        } else if (pos.type === "lp" && Array.isArray(pos.reserves)) {
+          // SDEX classic AMM pool — list each reserve with the user's share
+          for (const r of pos.reserves) {
+            html += `
+              <div class="defi-detail-item">
+                <div class="defi-detail-label">${r.code}</div>
+                <div class="defi-detail-value">${fmt(r.userShare, 4)}</div>
+              </div>
+            `;
+          }
+          html += `
+            <div class="defi-detail-item">
+              <div class="defi-detail-label">Pool Share</div>
+              <div class="defi-detail-value">${fmt(pos.shareOfPool * 100, 4)}%</div>
+            </div>
+          `;
+        } else if (pos.type === "concentrated_lp") {
           html += `
             <div class="defi-detail-item">
               <div class="defi-detail-label">${pos.token0.symbol}</div>
