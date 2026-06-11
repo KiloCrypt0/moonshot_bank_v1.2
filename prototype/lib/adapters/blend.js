@@ -26,7 +26,7 @@ const {
   getTokenMetadata,
 } = require("../soroban-rpc");
 const StellarSdk = require("@stellar/stellar-sdk");
-const { Address, nativeToScVal } = StellarSdk;
+const { Address, nativeToScVal, scValToNative } = StellarSdk;
 const tokenUniverse = require("../token-universe");
 const { priceSorobanToken } = require("../pricing-engine");
 
@@ -40,6 +40,16 @@ const SCALAR_7 = 1e7;
 
 const BLEND_POOL_FACTORY = process.env.BLEND_POOL_FACTORY ||
   "CDSYOAVXFY7SM5S64IZPPPYB4GVGGLMQVFREPSQQEZVIWXX5R23G4QSU";
+
+// BLND token contract on Stellar mainnet. Used to price pending emissions
+// and compute the emission-APR pill values that appear next to supply/borrow
+// APY on Blend's own dashboard.
+const BLND_TOKEN_CONTRACT = process.env.BLND_TOKEN_CONTRACT ||
+  "CD25MNVTZDL4Y3XBCPCJXGXATV5WUHHOWMYFF4YBEGU5FCPGMYTVG5JY";
+
+// Seconds in a year — used for emission-APR conversion. Using 365.25 days
+// to match the convention Blend's UI uses.
+const SECONDS_PER_YEAR = 31557600;
 
 const KNOWN_POOLS = [
   { contractId: "CAJJZSGMMM3PD7N33TAPHGBUGTB43OC73HVIK2L2G6BNGGGYOSSYBXBD", name: "Fixed Pool V2" },
@@ -114,28 +124,44 @@ async function _refreshFactoryPools() {
 // Contract call wrappers
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Wrap simulateContractCall with the ScVal → native conversion that every
+ * other helper in this codebase performs (see soroban-rpc.js getPoolReserves
+ * for the canonical pattern). Returns null on error so callers can no-op
+ * gracefully.
+ *
+ * Why this exists as a wrapper: simulateContractCall returns the raw ScVal
+ * from `simResult.result.retval`. Operating on the ScVal directly (e.g.
+ * `result.collateral`) returns undefined for everything, which silently
+ * makes the adapter look broken — there's no exception, just empty results.
+ * This was the root cause of "0 DeFi positions found" after PR #23 shipped.
+ */
+async function _call(contractId, method, args = []) {
+  try {
+    const result = await simulateContractCall(contractId, method, args);
+    if (result == null) return null;
+    return scValToNative(result);
+  } catch (e) {
+    return null;
+  }
+}
+
 async function getReserveList(poolContractId) {
-  try { return await simulateContractCall(poolContractId, "get_reserve_list"); }
-  catch (e) { return null; }
+  return _call(poolContractId, "get_reserve_list");
 }
 
 async function getReserve(poolContractId, assetAddress) {
-  try {
-    const assetScVal = new Address(assetAddress).toScVal();
-    return await simulateContractCall(poolContractId, "get_reserve", [assetScVal]);
-  } catch (e) { return null; }
+  const assetScVal = new Address(assetAddress).toScVal();
+  return _call(poolContractId, "get_reserve", [assetScVal]);
 }
 
 async function getPoolConfig(poolContractId) {
-  try { return await simulateContractCall(poolContractId, "get_config"); }
-  catch (e) { return null; }
+  return _call(poolContractId, "get_config");
 }
 
 async function getUserPositions(poolContractId, userAddress) {
-  try {
-    const userScVal = new Address(userAddress).toScVal();
-    return await simulateContractCall(poolContractId, "get_positions", [userScVal]);
-  } catch (e) { return null; }
+  const userScVal = new Address(userAddress).toScVal();
+  return _call(poolContractId, "get_positions", [userScVal]);
 }
 
 /**
@@ -145,17 +171,29 @@ async function getUserPositions(poolContractId, userAddress) {
  *   index * 2 + 1 = dToken (borrowers) for that reserve
  */
 async function getUserEmissions(poolContractId, userAddress, reserveTokenIndex) {
-  try {
-    const userScVal = new Address(userAddress).toScVal();
-    const indexScVal = nativeToScVal(reserveTokenIndex, { type: "u32" });
-    const result = await simulateContractCall(poolContractId, "get_user_emissions",
-      [userScVal, indexScVal]);
-    if (result == null) return 0n;
-    if (typeof result === "bigint") return result;
-    if (typeof result === "object" && result.accrued != null) return BigInt(result.accrued);
-    if (typeof result === "object" && result.amount != null) return BigInt(result.amount);
-    return 0n;
-  } catch (e) { return 0n; }
+  const userScVal = new Address(userAddress).toScVal();
+  const indexScVal = nativeToScVal(reserveTokenIndex, { type: "u32" });
+  const result = await _call(poolContractId, "get_user_emissions", [userScVal, indexScVal]);
+  if (result == null) return 0n;
+  if (typeof result === "bigint") return result;
+  if (typeof result === "object" && result.accrued != null) return BigInt(result.accrued);
+  if (typeof result === "object" && result.amount != null) return BigInt(result.amount);
+  return 0n;
+}
+
+/**
+ * Fetch the emission config for one (reserve, side) — returns the per-second
+ * emission rate (`eps`) and an `expiration` timestamp. The rate is denominated
+ * in BLND tokens per protocol-token per second, scaled by 10^7.
+ *
+ * Used to compute the emission-APR pill shown next to supply/borrow APY:
+ * (eps * SECONDS_PER_YEAR / scalar) * BLND_price / underlying_TVL
+ *
+ * Returns null if no emissions are configured (pool doesn't emit on this side).
+ */
+async function getReserveEmissions(poolContractId, reserveTokenIndex) {
+  const indexScVal = nativeToScVal(reserveTokenIndex, { type: "u32" });
+  return _call(poolContractId, "get_reserve_emissions", [indexScVal]);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -355,14 +393,69 @@ async function _buildReserveRow({
   const suppliedUSD = suppliedUnderlying * priceUsd;
   const borrowedUSD = borrowedUnderlying * priceUsd;
 
-  // Pending BLND emissions (best-effort)
+  // BLND emissions: pending amount + per-side emission APR (the green pills
+  // that show up next to supply/borrow APY on Blend's dashboard, e.g. +0.08%).
+  // Emission APR = (eps_per_sec × seconds_per_year × BLND_price_usd) ÷ side_TVL_usd
   let pendingEmissions = 0n;
+  let supplyEmissionApy = 0;
+  let borrowEmissionApy = 0;
   try {
+    // Fetch BLND price once per row (cheap; pricing-engine has its own cache)
+    let blndPriceUsd = 0;
+    try {
+      const blndPrice = await priceSorobanToken(BLND_TOKEN_CONTRACT, { decimals: 7 });
+      blndPriceUsd = blndPrice?.usd || 0;
+    } catch (_) {}
+
+    const inner = reserveData?.data || reserveData || {};
+    const bSupplyRaw = BigInt(inner.b_supply ?? inner.bSupply ?? 0);
+    const dSupplyRaw = BigInt(inner.d_supply ?? inner.dSupply ?? 0);
+    const bRateBig = BigInt(bRate ?? 0);
+    const dRateBig = BigInt(dRate ?? 0);
+
+    // Reserve-wide TVL on each side, in underlying units
+    const reserveScale = 10n ** BigInt(BLEND_V2_RATE_SCALAR_DECIMALS);
+    const reserveSuppliedRaw = (bSupplyRaw * bRateBig) / reserveScale;
+    const reserveBorrowedRaw = (dSupplyRaw * dRateBig) / reserveScale;
+    const reserveSuppliedUSD = (Number(reserveSuppliedRaw) / 10 ** decimals) * priceUsd;
+    const reserveBorrowedUSD = (Number(reserveBorrowedRaw) / 10 ** decimals) * priceUsd;
+
+    // Supply side (token index = reserveIndex * 2)
     if (totalSuppliedBToken > 0n) {
       pendingEmissions += await getUserEmissions(pool.contractId, userAddress, reserveIndex * 2);
     }
+    const supplyEmissionsCfg = await getReserveEmissions(pool.contractId, reserveIndex * 2);
+    if (supplyEmissionsCfg && blndPriceUsd > 0 && reserveSuppliedUSD > 0) {
+      const eps = Number(BigInt(supplyEmissionsCfg.eps ?? supplyEmissionsCfg.rate ?? 0n)) / SCALAR_7;
+      const expiration = Number(supplyEmissionsCfg.expiration ?? supplyEmissionsCfg.exp ?? 0);
+      if (eps > 0 && expiration > Date.now() / 1000) {
+        supplyEmissionApy = (eps * SECONDS_PER_YEAR * blndPriceUsd) / reserveSuppliedUSD;
+      }
+    }
+
+    // Borrow side (token index = reserveIndex * 2 + 1)
     if (liabBig > 0n) {
       pendingEmissions += await getUserEmissions(pool.contractId, userAddress, reserveIndex * 2 + 1);
+    }
+    const borrowEmissionsCfg = await getReserveEmissions(pool.contractId, reserveIndex * 2 + 1);
+    if (borrowEmissionsCfg && blndPriceUsd > 0 && reserveBorrowedUSD > 0) {
+      const eps = Number(BigInt(borrowEmissionsCfg.eps ?? borrowEmissionsCfg.rate ?? 0n)) / SCALAR_7;
+      const expiration = Number(borrowEmissionsCfg.expiration ?? borrowEmissionsCfg.exp ?? 0);
+      if (eps > 0 && expiration > Date.now() / 1000) {
+        borrowEmissionApy = (eps * SECONDS_PER_YEAR * blndPriceUsd) / reserveBorrowedUSD;
+      }
+    }
+
+    // Sanity-check emission APRs (same defense as base APY)
+    if (Math.abs(supplyEmissionApy) > 10 || Math.abs(borrowEmissionApy) > 10) {
+      console.warn(
+        `[Blend] suspicious emission APY: supply=${supplyEmissionApy} borrow=${borrowEmissionApy} ` +
+          `pool=${pool.contractId.slice(0, 10)} asset=${assetAddress.slice(0, 10)} ` +
+          `blndPriceUsd=${blndPriceUsd} reserveSuppliedUSD=${reserveSuppliedUSD} ` +
+          `reserveBorrowedUSD=${reserveBorrowedUSD}`
+      );
+      supplyEmissionApy = 0;
+      borrowEmissionApy = 0;
     }
   } catch (_) {}
   const pendingBlnd = Number(pendingEmissions) / SCALAR_7;
@@ -372,9 +465,11 @@ async function _buildReserveRow({
     supplied: suppliedUnderlying,
     suppliedUSD,
     supplyApy,
+    supplyEmissionApy,
     borrowed: borrowedUnderlying,
     borrowedUSD,
     borrowApy,
+    borrowEmissionApy,
     netUSD: suppliedUSD - borrowedUSD,
     price: price ? { usd: price.usd, source: price.source } : null,
     utilization,
@@ -446,6 +541,7 @@ function _flattenPoolGroup(group) {
         underlyingAmount: r.supplied,
         valueUSD: r.suppliedUSD,
         apy: r.supplyApy,
+        emissionApy: r.supplyEmissionApy,
         price: r.price,
       });
     }
@@ -462,6 +558,7 @@ function _flattenPoolGroup(group) {
         underlyingAmount: r.borrowed,
         valueUSD: -r.borrowedUSD,
         apy: r.borrowApy,
+        emissionApy: r.borrowEmissionApy,
         price: r.price,
       });
     }
