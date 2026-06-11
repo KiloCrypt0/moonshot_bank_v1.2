@@ -15,6 +15,7 @@ const SolvProtocolAdapter = require("./lib/adapters/solv-protocol");
 const BlendAdapter = require("./lib/adapters/blend");
 const AquariusAdapter = require("./lib/adapters/aquarius");
 const TemplarAdapter = require("./lib/adapters/templar");
+const SdexAdapter = require("./lib/adapters/sdex");
 const snapshotScheduler = require("./lib/snapshot-scheduler");
 const createPublicApiRoutes = require("./lib/public-api-routes");
 const { resolveNfts } = require("./lib/nft-resolver");
@@ -42,6 +43,7 @@ const PROTOCOL_ADAPTERS = [
   TemplarAdapter,
   SushiSwapV3Adapter,
   SolvProtocolAdapter,
+  SdexAdapter,
 ];
 
 // ── Price Engine ──────────────────────────────────────────────────────────────
@@ -201,13 +203,11 @@ app.get("/api/v1/account/:address", async (req, res) => {
           price: xlmPrice,
         });
       } else if (bal.asset_type === "liquidity_pool_shares") {
-        // LP position — we'll resolve this separately
-        balances.push({
-          type: "lp_share",
-          poolId: bal.liquidity_pool_id,
-          shares: bal.balance,
-          valueUSD: 0, // Will be enriched
-        });
+        // Skip — pool shares are surfaced as DeFi positions by the SDEX
+        // adapter (with enriched reserve composition and USD value), not as
+        // raw rows in the Tokens tab. Avoids double-counting and gives users
+        // a single home for "money the wallet has put to work somewhere".
+        continue;
       } else {
         // Standard trustline token
         const code = bal.asset_code;
@@ -281,7 +281,7 @@ app.get("/api/v1/account/:address", async (req, res) => {
     for (const adapter of PROTOCOL_ADAPTERS) {
       if (!adapter.isConfigured()) continue;
       try {
-        const positions = await adapter.getPositions(address);
+        const positions = await adapter.getPositions(address, { xlmPrice });
         for (const pos of positions) {
           totalValueUSD += pos.valueUSD || 0;
           defiPositions.push(pos);
@@ -1349,7 +1349,8 @@ async function fetchPortfolioForScheduler(address) {
         price: xlmPrice,
       });
     } else if (bal.asset_type === "liquidity_pool_shares") {
-      balances.push({ type: "lp_share", poolId: bal.liquidity_pool_id, shares: bal.balance, valueUSD: 0 });
+      // Skip — pool shares come through the SDEX adapter (see DeFi tab).
+      continue;
     } else {
       const code = bal.asset_code;
       const issuer = bal.asset_issuer;
