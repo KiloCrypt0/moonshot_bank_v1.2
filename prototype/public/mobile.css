@@ -134,10 +134,15 @@
     font-size: 16px;
   }
 
-  /* Whale tables — make scrollable if needed */
+  /* Whale tables — full width, hide Assets column to reduce squeeze */
   .whale-section {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+  }
+
+  .whale-table {
+    width: 100%;
+    table-layout: fixed;
   }
 
   .whale-table th,
@@ -146,12 +151,20 @@
     font-size: 12px;
   }
 
+  /* Hide the "Assets" column (4th) on mobile */
+  .whale-table th:nth-child(4),
+  .whale-table td:nth-child(4) {
+    display: none;
+  }
+
   .whale-address {
     font-size: 11px !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .whale-rank {
-    width: 30px;
+    width: 28px;
   }
 
   /* Portfolio views */
