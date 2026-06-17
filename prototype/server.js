@@ -891,6 +891,7 @@ app.post("/api/v1/portfolio", async (req, res) => {
 
         // DeFi positions
         const defiPositions = [];
+        const defiByPool = [];
         for (const adapter of PROTOCOL_ADAPTERS) {
           if (!adapter.isConfigured()) continue;
           try {
@@ -898,6 +899,12 @@ app.post("/api/v1/portfolio", async (req, res) => {
             for (const pos of positions) {
               walletTotalUSD += pos.valueUSD || 0;
               defiPositions.push(pos);
+            }
+            // Extract grouped Blend pool data (same as single-wallet endpoint)
+            if (Array.isArray(positions.__blendPoolGroups)) {
+              for (const g of positions.__blendPoolGroups) {
+                defiByPool.push({ protocol: "blend", ...g });
+              }
             }
           } catch (e) {}
         }
@@ -916,6 +923,7 @@ app.post("/api/v1/portfolio", async (req, res) => {
           balanceCount: balances.length,
           balances,
           defiPositions,
+          defiByPool,
         });
 
         // Auto-snapshot
@@ -941,6 +949,7 @@ app.post("/api/v1/portfolio", async (req, res) => {
           totalValueUSD: 0,
           balances: [],
           defiPositions: [],
+          defiByPool: [],
         });
       }
     }
@@ -1428,20 +1437,4 @@ app.use(createPublicApiRoutes(fetchPortfolioForScheduler));
 
 app.listen(PORT, () => {
   console.log(`Stellar Moonshot Bank API running on http://localhost:${PORT}`);
-  console.log(`Dashboard: http://localhost:${PORT}`);
-
-  // Start background snapshot scheduler
-  snapshotScheduler.start();
-
-  // Run daily downsampling at startup (and it could be scheduled via cron too)
-  setTimeout(() => {
-    try {
-      const result = historyDb.downsampleAll();
-      if (result.totalDeletedRows > 0) {
-        console.log(`[Cleanup] Downsampled ${result.totalDeletedRows} old snapshots across ${result.walletsProcessed} wallets`);
-      }
-    } catch (e) {
-      console.error("[Cleanup] Downsample error:", e.message);
-    }
-  }, 30_000);
-});
+  console.log(`Dashboard: http://localhost:${
