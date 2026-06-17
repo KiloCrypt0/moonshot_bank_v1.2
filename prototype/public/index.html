@@ -16,8 +16,25 @@
       }
     } catch (e) {}
   </script>
+  <script>
+    // Suppress uncaught errors from wallet browser extensions (MetaMask,
+    // evmAsk, etc.) that inject scripts into the page context and fight
+    // over window.ethereum. Without this, their errors can abort our own
+    // script execution and break page features like the DeFi tab.
+    window.addEventListener("error", function (e) {
+      var src = (e.filename || "").toLowerCase();
+      if (src.indexOf("chrome-extension://") !== -1 ||
+          src.indexOf("moz-extension://") !== -1 ||
+          src.indexOf("evmask") !== -1 ||
+          src.indexOf("inpage.js") !== -1 ||
+          src.indexOf("contentscript") !== -1) {
+        e.preventDefault();
+        return false;
+      }
+    });
+  </script>
   <title>Stellar Scope</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/stellar-freighter-api/2.0.0/index.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/stellar-freighter-api/2.0.0/index.min.js" defer></script>
   <style>
     /* Dark theme (default) and light theme.
        Both use the same variable NAMES so every existing rule that says
