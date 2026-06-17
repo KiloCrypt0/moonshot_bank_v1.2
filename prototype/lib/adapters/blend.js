@@ -26,7 +26,7 @@ const {
   getTokenMetadata,
 } = require("../soroban-rpc");
 const StellarSdk = require("@stellar/stellar-sdk");
-const { Address, nativeToScVal } = StellarSdk;
+const { Address, nativeToScVal, scValToNative } = StellarSdk;
 const tokenUniverse = require("../token-universe");
 const { priceSorobanToken } = require("../pricing-engine");
 
@@ -119,26 +119,26 @@ async function _refreshFactoryPools() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function getReserveList(poolContractId) {
-  try { return await simulateContractCall(poolContractId, "get_reserve_list"); }
+  try { const r = await simulateContractCall(poolContractId, "get_reserve_list"); return r ? scValToNative(r) : null; }
   catch (e) { return null; }
 }
 
 async function getReserve(poolContractId, assetAddress) {
   try {
     const assetScVal = new Address(assetAddress).toScVal();
-    return await simulateContractCall(poolContractId, "get_reserve", [assetScVal]);
+    const r = await simulateContractCall(poolContractId, "get_reserve", [assetScVal]); return r ? scValToNative(r) : null;
   } catch (e) { return null; }
 }
 
 async function getPoolConfig(poolContractId) {
-  try { return await simulateContractCall(poolContractId, "get_config"); }
+  try { const r = await simulateContractCall(poolContractId, "get_config"); return r ? scValToNative(r) : null; }
   catch (e) { return null; }
 }
 
 async function getUserPositions(poolContractId, userAddress) {
   try {
     const userScVal = new Address(userAddress).toScVal();
-    return await simulateContractCall(poolContractId, "get_positions", [userScVal]);
+    const r = await simulateContractCall(poolContractId, "get_positions", [userScVal]); return r ? scValToNative(r) : null;
   } catch (e) { return null; }
 }
 
