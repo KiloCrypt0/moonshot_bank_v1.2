@@ -304,4 +304,211 @@ async function _resolveAssetMetadata(assetAddress) {
 async function _buildReserveRow({
   pool, reserveIndex, assetAddress, reserveData, poolConfig, userPositions, userAddress,
 }) {
-  const { symbol, decimals } = await _resolv
+  const { symbol, decimals } = await _resolveAssetMetadata(assetAddress);
+
+  const inner = reserveData?.data || reserveData || {};
+  const bRate = inner.b_rate ?? inner.bRate;
+  const dRate = inner.d_rate ?? inner.dRate;
+
+  const collat = (userPositions.collateral || userPositions.Collateral || {})[reserveIndex] || 0n;
+  const supply = (userPositions.supply || userPositions.Supply || {})[reserveIndex] || 0n;
+  const liab   = (userPositions.liabilities || userPositions.Liabilities || {})[reserveIndex] || 0n;
+
+  const collatBig = BigInt(collat);
+  const supplyBig = BigInt(supply);
+  const liabBig = BigInt(liab);
+
+  const totalSuppliedBToken = collatBig + supplyBig;
+  const suppliedUnderlying = protocolToUnderlying(totalSuppliedBToken, bRate, decimals);
+  const borrowedUnderlying = protocolToUnderlying(liabBig, dRate, decimals);
+
+  if ((totalSuppliedBToken > 0n && suppliedUnderlying === 0) ||
+      (liabBig > 0n && borrowedUnderlying === 0)) {
+    console.warn(
+      `[Blend] underlying=0 from non-zero protocolTokens — possible struct/scalar change. ` +
+        `pool=${pool.contractId.slice(0, 10)} asset=${assetAddress.slice(0, 10)} ` +
+        `bSupplied=${totalSuppliedBToken} bRate=${bRate} dLiab=${liabBig} dRate=${dRate}`
+    );
+  }
+
+  // Reserve-level metrics
+  const rateParams = _extractReserveRateParams(reserveData);
+  const utilization = _computeUtilization(reserveData);
+  const backstopTakeRate = fromScalar7(
+    poolConfig?.bstop_rate ?? poolConfig?.backstopRate ?? poolConfig?.bstopRate ?? 0
+  );
+
+  const borrowApr = computeBorrowApr({ ...rateParams, utilization });
+  const supplyApr = computeSupplyApr({ borrowApr, utilization, backstopTakeRate });
+  const borrowApy = aprToApy(borrowApr);
+  const supplyApy = aprToApy(supplyApr);
+
+  if (Math.abs(borrowApy) > 10 || Math.abs(supplyApy) > 10) {
+    console.warn(
+      `[Blend] suspicious APY: borrow=${borrowApy} supply=${supplyApy} ` +
+        `pool=${pool.contractId.slice(0, 10)} asset=${assetAddress.slice(0, 10)} ` +
+        `util=${utilization} params=${JSON.stringify(rateParams)} ` +
+        `backstopTakeRate=${backstopTakeRate}`
+    );
+  }
+
+  // Price
+  let price = null;
+  try { price = await priceSorobanToken(assetAddress, { decimals }); } catch (_) {}
+  const priceUsd = price?.usd || 0;
+  const suppliedUSD = suppliedUnderlying * priceUsd;
+  const borrowedUSD = borrowedUnderlying * priceUsd;
+
+  // Pending BLND emissions (best-effort)
+  let pendingEmissions = 0n;
+  try {
+    if (totalSuppliedBToken > 0n) {
+      pendingEmissions += await getUserEmissions(pool.contractId, userAddress, reserveIndex * 2);
+    }
+    if (liabBig > 0n) {
+      pendingEmissions += await getUserEmissions(pool.contractId, userAddress, reserveIndex * 2 + 1);
+    }
+  } catch (_) {}
+  const pendingBlnd = Number(pendingEmissions) / SCALAR_7;
+
+  return {
+    reserveIndex, asset: symbol, assetAddress, decimals,
+    supplied: suppliedUnderlying,
+    suppliedUSD,
+    supplyApy,
+    borrowed: borrowedUnderlying,
+    borrowedUSD,
+    borrowApy,
+    netUSD: suppliedUSD - borrowedUSD,
+    price: price ? { usd: price.usd, source: price.source } : null,
+    utilization,
+    pendingBlnd,
+  };
+}
+
+async function _resolveUserPositionsInPool(pool, userAddress) {
+  const reserveList = await getReserveList(pool.contractId);
+  if (!reserveList || reserveList.length === 0) return null;
+
+  const userPositions = await getUserPositions(pool.contractId, userAddress);
+  if (!userPositions) return null;
+
+  const poolConfig = await getPoolConfig(pool.contractId);
+
+  const rows = [];
+  for (let i = 0; i < reserveList.length; i++) {
+    const assetAddress = reserveList[i];
+    const collat = (userPositions.collateral || userPositions.Collateral || {})[i] || 0n;
+    const supply = (userPositions.supply || userPositions.Supply || {})[i] || 0n;
+    const liab   = (userPositions.liabilities || userPositions.Liabilities || {})[i] || 0n;
+
+    if (BigInt(collat) === 0n && BigInt(supply) === 0n && BigInt(liab) === 0n) continue;
+
+    const reserveData = await getReserve(pool.contractId, assetAddress);
+    if (!reserveData) continue;
+
+    const row = await _buildReserveRow({
+      pool, reserveIndex: i, assetAddress, reserveData, poolConfig, userPositions, userAddress,
+    });
+    rows.push(row);
+  }
+
+  if (rows.length === 0) return null;
+
+  const totalSuppliedUSD = rows.reduce((s, r) => s + r.suppliedUSD, 0);
+  const totalBorrowedUSD = rows.reduce((s, r) => s + r.borrowedUSD, 0);
+
+  return {
+    poolContractId: pool.contractId,
+    poolName: pool.name || `Blend Pool (${pool.contractId.slice(0, 6)}…)`,
+    rows,
+    totalSuppliedUSD,
+    totalBorrowedUSD,
+    netUSD: totalSuppliedUSD - totalBorrowedUSD,
+    debtRatio: totalSuppliedUSD > 0 ? totalBorrowedUSD / totalSuppliedUSD : 0,
+    totalPendingBlnd: rows.reduce((s, r) => s + r.pendingBlnd, 0),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Flattening for legacy server.js compatibility
+// ─────────────────────────────────────────────────────────────────────────────
+
+function _flattenPoolGroup(group) {
+  const flat = [];
+  for (const r of group.rows) {
+    if (r.suppliedUSD !== 0) {
+      flat.push({
+        protocol: "blend",
+        type: "lending",
+        subtype: "collateral",
+        poolContractId: group.poolContractId,
+        poolName: group.poolName,
+        asset: r.asset,
+        assetAddress: r.assetAddress,
+        decimals: r.decimals,
+        underlyingAmount: r.supplied,
+        valueUSD: r.suppliedUSD,
+        apy: r.supplyApy,
+        price: r.price,
+      });
+    }
+    if (r.borrowedUSD !== 0) {
+      flat.push({
+        protocol: "blend",
+        type: "borrowing",
+        subtype: "liability",
+        poolContractId: group.poolContractId,
+        poolName: group.poolName,
+        asset: r.asset,
+        assetAddress: r.assetAddress,
+        decimals: r.decimals,
+        underlyingAmount: r.borrowed,
+        valueUSD: -r.borrowedUSD,
+        apy: r.borrowApy,
+        price: r.price,
+      });
+    }
+  }
+  return flat;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public API
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function getPositions(userAddress) {
+  _refreshFactoryPools().catch(() => {});
+
+  const pools = getConfiguredPools();
+  if (pools.length === 0) return [];
+
+  const groups = [];
+  for (const pool of pools) {
+    try {
+      const group = await _resolveUserPositionsInPool(pool, userAddress);
+      if (group) groups.push(group);
+    } catch (e) {
+      console.error(`[Blend] Failed to resolve pool ${pool.contractId}: ${e.message}`);
+    }
+  }
+
+  const flat = [];
+  for (const g of groups) flat.push(..._flattenPoolGroup(g));
+  // Attach grouped data alongside the flat array for frontend table rendering
+  flat.__blendPoolGroups = groups;
+  return flat;
+}
+
+function isConfigured() {
+  return getConfiguredPools().length > 0;
+}
+
+const BlendAdapter = {
+  name: "Blend Protocol",
+  protocol: "blend",
+  isConfigured,
+  getPositions,
+};
+
+module.exports = BlendAdapter;
