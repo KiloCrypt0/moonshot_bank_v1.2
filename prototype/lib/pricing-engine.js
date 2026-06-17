@@ -204,6 +204,17 @@ async function enrichSorobanTokenWithPrice(token) {
 
 // ── Stats / debugging ────────────────────────────────────────────────────────
 
+/**
+ * Pre-seed the Soroban token price cache. Useful for avoiding redundant
+ * CoinGecko calls when the caller already knows the price (e.g. the server
+ * fetches the XLM price for native balances — seeding the XLM SAC contract
+ * here prevents a second CoinGecko call that may hit rate limits).
+ */
+function seedSorobanPrice(contractId, priceObj) {
+  if (!contractId || !priceObj) return;
+  _cacheSet(`soroban:${contractId}`, priceObj);
+}
+
 function stats() {
   return {
     cacheSize: cache.size,
@@ -217,6 +228,7 @@ module.exports = {
   priceClassicAsset,
   priceSorobanToken,
   enrichSorobanTokenWithPrice,
+  seedSorobanPrice,
   STABLECOINS,
   stats,
 };

@@ -26,7 +26,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// Mainnet only â€” read-only portfolio tracker
+// Mainnet only — read-only portfolio tracker
 const HORIZON_URL = "https://horizon.stellar.org";
 
 function getHorizon() {
@@ -35,7 +35,7 @@ function getHorizon() {
 
 const horizon = getHorizon();
 
-// Protocol adapter registry â€” add new adapters here
+// Protocol adapter registry — add new adapters here
 const PROTOCOL_ADAPTERS = [
   BlendAdapter,
   AquariusAdapter,
@@ -44,7 +44,7 @@ const PROTOCOL_ADAPTERS = [
   SolvProtocolAdapter,
 ];
 
-// â”€â”€ Price Engine â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Price Engine ──────────────────────────────────────────────────────────────
 
 const priceCache = new Map();
 const PRICE_TTL = 60_000; // 60 seconds
@@ -106,6 +106,11 @@ async function getAssetPriceViaSDEX(assetCode, assetIssuer) {
     }
 
     const xlmPrice = await getXLMPrice();
+
+    // Seed XLM SAC price so Blend adapter avoids redundant CoinGecko call
+    pricingEngine.seedSorobanPrice("CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA", {
+      usd: xlmPrice.usd, change24h: xlmPrice.change24h, source: "coingecko", confidence: "high",
+    });
     const priceUSD = priceInXLM * xlmPrice.usd;
 
     const price = { usd: priceUSD, xlm: priceInXLM, change24h: 0 };
@@ -117,7 +122,7 @@ async function getAssetPriceViaSDEX(assetCode, assetIssuer) {
   }
 }
 
-// â”€â”€ Known stablecoins (shortcut pricing) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Known stablecoins (shortcut pricing) ─────────────────────────────────────
 
 const STABLECOINS = {
   "USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN": 1.0,
@@ -161,7 +166,7 @@ function dedupSACsAgainstClassicBalances(discoveredTokens, classicBalances) {
   });
 }
 
-// â”€â”€ API Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── API Routes ────────────────────────────────────────────────────────────────
 
 // Full portfolio summary
 app.get("/api/v1/account/:address", async (req, res) => {
@@ -201,7 +206,7 @@ app.get("/api/v1/account/:address", async (req, res) => {
           price: xlmPrice,
         });
       } else if (bal.asset_type === "liquidity_pool_shares") {
-        // LP position â€” we'll resolve this separately
+        // LP position — we'll resolve this separately
         balances.push({
           type: "lp_share",
           poolId: bal.liquidity_pool_id,
@@ -245,7 +250,7 @@ app.get("/api/v1/account/:address", async (req, res) => {
       }
     }
 
-    // â”€â”€ Soroban token balances (SolvBTC, etc.) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Soroban token balances (SolvBTC, etc.) ──────────────────────────────
     let sorobanTokens = [];
     try {
       sorobanTokens = await resolveSorobanTokens(address);
@@ -257,7 +262,7 @@ app.get("/api/v1/account/:address", async (req, res) => {
       console.error("Soroban token resolution error:", e.message);
     }
 
-    // â”€â”€ Auto-discovered Soroban tokens (not in the static registry) â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Auto-discovered Soroban tokens (not in the static registry) ─────────
     // Scans the wallet's invoke_host_function history for SEP-41 token
     // contracts and queries balances. Cached per address (5 min default).
     let discoveredTokens = [];
@@ -275,7 +280,7 @@ app.get("/api/v1/account/:address", async (req, res) => {
       console.error("Soroban token discovery error:", e.message);
     }
 
-    // â”€â”€ DeFi positions (SushiSwap V3, Solv vaults, etc.) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── DeFi positions (SushiSwap V3, Solv vaults, etc.) ─────────────────
     const defiPositions = [];
     const defiByPool = []; // grouped data, currently from Blend; future adapters may add
     for (const adapter of PROTOCOL_ADAPTERS) {
@@ -429,7 +434,7 @@ app.get("/api/v1/account/:address/claimable", async (req, res) => {
   }
 });
 
-// NFT holdings â€” classic Stellar assets that look like NFTs, with SEP-1/SEP-39
+// NFT holdings — classic Stellar assets that look like NFTs, with SEP-1/SEP-39
 // metadata resolved from the issuer's stellar.toml where available.
 app.get("/api/v1/account/:address/nfts", async (req, res) => {
   try {
@@ -466,7 +471,7 @@ app.get("/api/v1/account/:address/collectibles", async (req, res) => {
   }
 });
 
-// Live price ticker â€” feeds the marquee banner. 30s server-side cache.
+// Live price ticker — feeds the marquee banner. 30s server-side cache.
 app.get("/api/v1/prices/ticker", async (_req, res) => {
   try {
     const result = await getTickerPrices();
@@ -587,7 +592,7 @@ app.get("/api/v1/soroban/registry", (req, res) => {
   });
 });
 
-// â”€â”€ Portfolio History API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Portfolio History API ─────────────────────────────────────────────────────
 
 // Get portfolio value history (chart data)
 app.get("/api/v1/account/:address/portfolio-history", (req, res) => {
@@ -744,7 +749,7 @@ app.get("/api/v1/history/stats", (req, res) => {
   }
 });
 
-// â”€â”€ Multi-Wallet Portfolio API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Multi-Wallet Portfolio API ───────────────────────────────────────────────
 
 // List all tracked wallets
 app.get("/api/v1/wallets", (req, res) => {
@@ -823,11 +828,16 @@ app.post("/api/v1/portfolio", async (req, res) => {
 
     const h = getHorizon();
     const xlmPrice = await getXLMPrice();
+
+    // Seed XLM SAC price so Blend adapter avoids redundant CoinGecko call
+    pricingEngine.seedSorobanPrice("CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA", {
+      usd: xlmPrice.usd, change24h: xlmPrice.change24h, source: "coingecko", confidence: "high",
+    });
     const walletResults = [];
     let grandTotalUSD = 0;
 
     // Aggregate balances across wallets by asset key
-    const assetAgg = new Map(); // key â†’ { code, issuer, totalBalance, totalValueUSD, price }
+    const assetAgg = new Map(); // key → { code, issuer, totalBalance, totalValueUSD, price }
 
     for (const address of walletAddresses) {
       try {
@@ -985,7 +995,7 @@ app.post("/api/v1/portfolio/history", (req, res) => {
     }
 
     // Get history for each wallet and merge by timestamp
-    const timeMap = new Map(); // timestamp â†’ { totalValueUSD, perWallet }
+    const timeMap = new Map(); // timestamp → { totalValueUSD, perWallet }
 
     for (const address of walletAddresses) {
       const snapshots = historyDb.getHistory(address, "mainnet", range);
@@ -1109,12 +1119,12 @@ app.get("/api/v1/whales", async (req, res) => {
   }
 });
 
-// â”€â”€ Portfolio Whale Scorer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Portfolio Whale Scorer ────────────────────────────────────────────────────
 // Strategy:
 //  1. Fetch top holders of each of the 15 tracked assets from Stellar Expert.
 //  2. Union those G... addresses (ignoring dust and contract addresses).
 //  3. Score each candidate: classic assets via Horizon + Soroban balances from
-//     the SE holder data (no extra RPC needed â€” SE already provides balances).
+//     the SE holder data (no extra RPC needed — SE already provides balances).
 //  4. Rank by total non-XLM USD value across ALL assets, return top 10.
 //  Results are cached 30 minutes and refreshed in the background.
 
@@ -1164,7 +1174,7 @@ async function scoreWallet(h, address, sorobanBalances, classicPrices) {
   let totalUSD = 0;
   let assetCount = 0;
 
-  // Classic tracked assets â€” look up Horizon balance, price from pre-fetched map
+  // Classic tracked assets — look up Horizon balance, price from pre-fetched map
   const trackedClassic = TRACKED_ASSETS.filter(a => a.kind === "classic");
   try {
     const account = await h.loadAccount(address);
@@ -1182,7 +1192,7 @@ async function scoreWallet(h, address, sorobanBalances, classicPrices) {
     }
   } catch (e) { /* account may not load */ }
 
-  // Soroban tracked assets â€” use balances already fetched from SE
+  // Soroban tracked assets — use balances already fetched from SE
   for (const asset of TRACKED_ASSETS.filter(a => a.kind === "soroban")) {
     const rawBal = sorobanBalances.get(asset.contractId);
     if (!rawBal || rawBal <= 0) continue;
@@ -1203,7 +1213,7 @@ async function scoreWallet(h, address, sorobanBalances, classicPrices) {
 async function fetchClassicTrackedPrices() {
   const classics = TRACKED_ASSETS.filter(a => a.kind === "classic" && a.coingeckoId);
   const ids = classics.map(a => a.coingeckoId).join(",");
-  const prices = new Map(); // `${code}:${issuer}` â†’ priceUSD
+  const prices = new Map(); // `${code}:${issuer}` → priceUSD
   try {
     const res = await fetch(
       `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`
@@ -1214,7 +1224,7 @@ async function fetchClassicTrackedPrices() {
       if (usd) prices.set(`${asset.code}:${asset.issuer}`, usd);
     }
   } catch (e) {
-    // CoinGecko failed â€” fall back to hints only
+    // CoinGecko failed — fall back to hints only
     for (const asset of classics) {
       if (asset.priceHintUSD) prices.set(`${asset.code}:${asset.issuer}`, asset.priceHintUSD);
     }
@@ -1236,9 +1246,9 @@ async function computePortfolioWhales() {
     ]);
     console.log(`[portfolio-whales] Classic prices fetched: ${classicPrices.size} assets`);
 
-    // Step 2: build candidate map â€” address â†’ soroban balances
+    // Step 2: build candidate map — address → soroban balances
     // Also union all G... addresses into a candidate set
-    const sorobanBalanceMap = new Map(); // address â†’ Map<contractId, rawBalance>
+    const sorobanBalanceMap = new Map(); // address → Map<contractId, rawBalance>
     const candidateSet = new Set();
 
     TRACKED_ASSETS.forEach((asset, idx) => {
@@ -1295,7 +1305,7 @@ app.get("/api/v1/portfolio-whales", async (req, res) => {
   }
 
   if (!portfolioWhaleCache) {
-    return res.status(503).json({ error: "Still computing â€” try again in a moment" });
+    return res.status(503).json({ error: "Still computing — try again in a moment" });
   }
 
   const stale = Date.now() - new Date(portfolioWhaleCache.computedAt).getTime() > PORTFOLIO_WHALE_TTL;
@@ -1327,7 +1337,7 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-// â”€â”€ Background Snapshot Scheduler â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Background Snapshot Scheduler ────────────────────────────────────────────
 
 /**
  * Fetch a full portfolio for a given address/network.
