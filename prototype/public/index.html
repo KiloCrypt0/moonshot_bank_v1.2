@@ -2001,6 +2001,7 @@
     // ── State ──────────────────────────────────────────────────
     let currentData = null;
     let currentTab = "tokens";
+    let currentAggTab = "tokens";
     let historyData = null;
     let claimableData = null;
     let nftsData = null;
@@ -2525,6 +2526,7 @@
       if (activeView === "all") {
 app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent(d);
         drawAllocationPieChart(d);
+        renderAggTabContent();
       } else {
         const walletData = d.wallets.find((w) => w.address === activeView);
         if (walletData) {
@@ -2638,81 +2640,8 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
       });
       chipsHTML += "</div>";
 
-      // Aggregated DeFi section
-      let defiHTML = "";
-      const allDefiByPool = [];
-      (d.wallets || []).forEach((w) => {
-        for (const g of (w.defiByPool || [])) {
-          allDefiByPool.push({ ...g, walletAddress: w.address, walletLabel: w.label });
-        }
-      });
-      if (allDefiByPool.length > 0) {
-        const totalSupplied = allDefiByPool.reduce((s, p) => s + (p.totalSuppliedUSD || 0), 0);
-        const totalBorrowed = allDefiByPool.reduce((s, p) => s + (p.totalBorrowedUSD || 0), 0);
-        const netDefiUSD = totalSupplied - totalBorrowed;
-        defiHTML += `<div style="margin-top:32px"><h3 style="font-size:16px; font-weight:700; margin-bottom:16px;">DeFi Positions</h3>`;
-        defiHTML += `<div class="defi-summary">`;
-        defiHTML += `<div class="defi-summary-stat"><div class="label">Supplied</div><div class="value">${fmtUSD(totalSupplied)}</div></div>`;
-        defiHTML += `<div class="defi-summary-stat"><div class="label">Borrowed</div><div class="value">${fmtUSD(totalBorrowed)}</div></div>`;
-        defiHTML += `<div class="defi-summary-stat"><div class="label">Net DeFi</div><div class="value ${netDefiUSD < 0 ? "negative" : "positive"}">${fmtUSD(netDefiUSD)}</div></div>`;
-        defiHTML += `</div>`;
-        for (const group of allDefiByPool) {
-          const protocolLabel = group.protocol === "blend" ? "Blend Protocol" : group.protocol;
-          const walletTag = group.walletLabel || shortenAddr(group.walletAddress);
-          defiHTML += `<div class="defi-card"><div class="defi-card-header"><div class="defi-protocol"><div class="defi-protocol-icon blend">${protocolLabel.slice(0, 2)}</div><div><div style="font-weight:600">${protocolLabel}</div><div style="font-size:12px; color:var(--text-muted)">${group.poolName} · ${walletTag}</div></div></div><div style="text-align:right"><div style="font-size:11px; color:var(--text-muted); text-transform:uppercase">Net</div><div style="font-weight:700; ${group.netUSD < 0 ? "color:var(--red)" : ""}">${fmtUSD(group.netUSD)}</div></div></div>`;
-          defiHTML += `<table class="defi-pool-table"><thead><tr><th>Asset</th><th class="right">Supply</th><th class="right">Borrow</th><th class="right">Value</th></tr></thead><tbody>`;
-          for (const row of (group.rows || [])) {
-            defiHTML += `<tr><td><strong>${row.asset}</strong></td>`;
-            defiHTML += `<td class="right">${row.supplied > 0 ? fmt(row.supplied, 4) + " " + row.asset : '<span class="muted">\u2014</span>'}</td>`;
-            defiHTML += `<td class="right">${row.borrowed > 0 ? '<span class="negative">' + fmt(row.borrowed, 4) + " " + row.asset + '</span>' : '<span class="muted">\u2014</span>'}</td>`;
-            defiHTML += `<td class="right ${row.netUSD < 0 ? "negative" : ""}">${fmtUSD(row.netUSD)}</td></tr>`;
-          }
-          defiHTML += `</tbody></table></div>`;
-        }
-        defiHTML += `</div>`;
-      }
-
-      // Aggregated token table
-      let tokenHTML = "";
-      if (balances.length > 0) {
-        tokenHTML = `
-          <div style="margin-top:32px">
-            <h3 style="font-size:16px; font-weight:700; margin-bottom:16px;">Combined Holdings</h3>
-            <div class="token-list">
-              <div class="token-row token-row-header">
-                <div>Asset</div>
-                <div style="text-align:right">Total Balance</div>
-                <div style="text-align:right" class="price-col">Price</div>
-                <div style="text-align:right">Total Value</div>
-              </div>
-        `;
-
-        balances.forEach((b) => {
-          const iconClass = b.code === "XLM" ? "xlm" : (b.code === "USDC" || b.code === "yUSDC") ? "usdc" : "default";
-          const initials = b.code.slice(0, 2);
-          const issuerShort = b.issuer ? shortenAddr(b.issuer) : "Native";
-          const priceStr = b.price ? "$" + fmt(b.price.usd, b.price.usd < 0.01 ? 6 : 4) : "";
-          const valueStr = b.totalValueUSD > 0 ? fmtUSD(b.totalValueUSD) : '<span class="unpriced">No price</span>';
-          const walletCountStr = b.wallets ? `${b.wallets.length} wallet${b.wallets.length > 1 ? "s" : ""}` : "";
-
-          tokenHTML += `
-            <div class="token-row">
-              <div class="token-info">
-                <div class="token-icon ${iconClass}">${initials}</div>
-                <div>
-                  <div class="token-name">${b.code}</div>
-                  <div class="token-issuer">${issuerShort} · ${walletCountStr}</div>
-                </div>
-              </div>
-              <div class="token-balance">${fmt(b.totalBalance, b.totalBalance < 1 ? 7 : 2)}</div>
-              <div class="token-price">${priceStr}</div>
-              <div class="token-value">${valueStr}</div>
-            </div>
-          `;
-        });
-
-        tokenHTML += "</div></div>";
-      }
+      // DeFi count for tab badge (per-pool detail now lives in renderAggTabContent)
+      const totalDefiCount = (d.wallets || []).reduce((sum, w) => sum + (w.defiPositions?.length || 0), 0);
 
       return `
         <div class="agg-header">
@@ -2759,8 +2688,118 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
           </div>
         </div>
 
-        ${tokenHTML}
-        ${defiHTML}
+        <div class="tabs">
+          <button class="tab ${currentAggTab === "tokens" ? "active" : ""}" onclick="switchAggTab('tokens')">
+            Tokens<span class="tab-count">${balances.length}</span>
+          </button>
+          <button class="tab ${currentAggTab === "history" ? "active" : ""}" onclick="switchAggTab('history')">
+            History
+          </button>
+          <button class="tab ${currentAggTab === "defi" ? "active" : ""}" onclick="switchAggTab('defi')">
+            DeFi<span class="tab-count">${totalDefiCount}</span>
+          </button>
+          <button class="tab ${currentAggTab === "transactions" ? "active" : ""}" onclick="switchAggTab('transactions')">
+            Transactions
+          </button>
+          <button class="tab ${currentAggTab === "claimable" ? "active" : ""}" onclick="switchAggTab('claimable')">
+            Claimable
+          </button>
+          <button class="tab ${currentAggTab === "nfts" ? "active" : ""}" onclick="switchAggTab('nfts')">
+            NFTs
+          </button>
+        </div>
+        <div id="aggTabContent"></div>
+      `;
+    }
+
+    function switchAggTab(tab) {
+      currentAggTab = tab;
+      document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+      if (typeof event !== "undefined" && event && event.target) {
+        const btn = event.target.closest(".tab");
+        if (btn) btn.classList.add("active");
+      }
+      renderAggTabContent();
+    }
+
+    function renderAggTabContent() {
+      const container = document.getElementById("aggTabContent");
+      if (!container) return;
+      const d = portfolioData;
+      if (!d) return;
+
+      if (currentAggTab === "tokens") {
+        const balances = d.aggregatedBalances || [];
+        if (balances.length === 0) {
+          container.innerHTML = '<div class="empty-state">No tokens found</div>';
+          return;
+        }
+        let html = `
+          <div class="token-list">
+            <div class="token-row token-row-header">
+              <div>Asset</div>
+              <div style="text-align:right">Total Balance</div>
+              <div style="text-align:right" class="price-col">Price</div>
+              <div style="text-align:right">Total Value</div>
+            </div>
+        `;
+        balances.forEach((b) => {
+          const iconClass = b.code === "XLM" ? "xlm" : (b.code === "USDC" || b.code === "yUSDC") ? "usdc" : "default";
+          const initials = b.code.slice(0, 2);
+          const issuerShort = b.issuer ? shortenAddr(b.issuer) : "Native";
+          const priceStr = b.price ? "$" + fmt(b.price.usd, b.price.usd < 0.01 ? 6 : 4) : "";
+          const valueStr = b.totalValueUSD > 0 ? fmtUSD(b.totalValueUSD) : '<span class="unpriced">No price</span>';
+          const walletCountStr = b.wallets ? `${b.wallets.length} wallet${b.wallets.length > 1 ? "s" : ""}` : "";
+          html += `
+            <div class="token-row">
+              <div class="token-info">
+                <div class="token-icon ${iconClass}">${initials}</div>
+                <div>
+                  <div class="token-name">${b.code}</div>
+                  <div class="token-issuer">${issuerShort} · ${walletCountStr}</div>
+                </div>
+              </div>
+              <div class="token-balance">${fmt(b.totalBalance, b.totalBalance < 1 ? 7 : 2)}</div>
+              <div class="token-price">${priceStr}</div>
+              <div class="token-value">${valueStr}</div>
+            </div>
+          `;
+        });
+        html += "</div>";
+        container.innerHTML = html;
+        return;
+      }
+
+      if (currentAggTab === "defi") {
+        const combinedByPool = [];
+        const combinedPositions = [];
+        (d.wallets || []).forEach((w) => {
+          for (const g of (w.defiByPool || [])) {
+            combinedByPool.push({ ...g, walletAddress: w.address, walletLabel: w.label });
+          }
+          for (const p of (w.defiPositions || [])) {
+            combinedPositions.push({ ...p, walletAddress: w.address, walletLabel: w.label });
+          }
+        });
+
+        const savedData = currentData;
+        currentData = {
+          defiPositions: combinedPositions,
+          defiByPool: combinedByPool,
+          defiProtocols: d.defiProtocols || [],
+        };
+        try {
+          renderDefi(container);
+        } finally {
+          currentData = savedData;
+        }
+        return;
+      }
+
+      container.innerHTML = `
+        <div class="empty-state">
+          Select an individual wallet from the panel above to view ${currentAggTab}.
+        </div>
       `;
     }
 
