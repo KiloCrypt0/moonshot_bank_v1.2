@@ -26,6 +26,12 @@
       "asOf": "2026-06-18",
       "source": "rwa.xyz"
     },
+    "tesouro-gcryug": {
+      "yield7d": "12.97%",
+      "marketCap": null,
+      "asOf": "2026-06-23",
+      "source": "Etherfuse (current bond APY)"
+    },
     "eutbl-cbgv2q": {
       "yield7d": "1.95%",
       "marketCap": "$925M",

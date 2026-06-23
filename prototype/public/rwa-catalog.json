@@ -221,7 +221,31 @@
             },
             {
               "name": "Etherfuse App",
-              "url": "https://app.etherfuse.com"
+              "url": "https://app.etherfuse.com/bonds/CETES"
+            }
+          ]
+        },
+        {
+          "code": "TESOURO",
+          "issuer": "GCRYUGD5NVARGXT56XEZI5CIFCQETYHAPQQTHO2O3IQZTHDH4LATMYWC",
+          "issuerName": "Etherfuse",
+          "issuerUrl": "https://www.etherfuse.com",
+          "description": "Tokenized Brazilian government Treasury bonds (Tesouro Nacional), denominated in BRL. Issued by Etherfuse to give global investors USD-bridged exposure to short-duration Brazilian sovereign debt.",
+          "notes": "Brazilian Treasury bonds (BRL-denominated)",
+          "yield7d": null,
+          "marketCap": null,
+          "venues": [
+            {
+              "name": "StellarX (TESOURO/USDC)",
+              "url": "https://www.stellarx.com/markets/TESOURO-GCRYUGD5NVARGXT56XEZI5CIFCQETYHAPQQTHO2O3IQZTHDH4LATMYWC/USDC-GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+            },
+            {
+              "name": "Aquarius (USDC → TESOURO)",
+              "url": "https://aqua.network/swap/USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN/TESOURO:GCRYUGD5NVARGXT56XEZI5CIFCQETYHAPQQTHO2O3IQZTHDH4LATMYWC/"
+            },
+            {
+              "name": "Etherfuse App",
+              "url": "https://app.etherfuse.com/bonds/TESOURO"
             }
           ]
         },

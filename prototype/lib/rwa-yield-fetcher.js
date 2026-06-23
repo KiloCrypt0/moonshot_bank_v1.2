@@ -162,8 +162,9 @@ async function fetchSpiko() {
 const ETHERFUSE_API = "https://api.etherfuse.com";
 
 const ETHERFUSE_SYMBOLS = {
-  USTRY: "ustry-gcryug",
-  CETES: "cetes-gcryug",
+  USTRY:   "ustry-gcryug",
+  CETES:   "cetes-gcryug",
+  TESOURO: "tesouro-gcryug",
 };
 
 async function fetchEtherfuse() {
