@@ -350,7 +350,28 @@
       "id": "tokenized-gold",
       "name": "Tokenized Gold",
       "description": "Tokens backed by physical gold.",
-      "assets": []
+      "assets": [
+        {
+          "code": "XAUM",
+          "contractId": "CC2RBGYNCFBCVENIDL5BFBWPH4OUZM2UA3OD2K2N54GLMWCC4KWPVAGO",
+          "issuerName": "Matrixdock",
+          "issuerUrl": "https://www.matrixdock.com/xaum",
+          "description": "Matrixdock Gold (XAUm) is a tokenized gold asset where each token represents one troy ounce of 99.99% pure LBMA-accredited gold. Reserves are fully allocated and securely vaulted with reputable custodians in Asia (Singapore / Hong Kong), independently audited. Physical redemption is available starting from 1 kg bars.",
+          "notes": "1 token = 1 troy oz of LBMA-accredited gold (Soroban)",
+          "yield7d": null,
+          "marketCap": null,
+          "venues": [
+            {
+              "name": "Matrixdock",
+              "url": "https://www.matrixdock.com/xaum"
+            },
+            {
+              "name": "Soroswap",
+              "url": "https://app.soroswap.finance/swap"
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "tokenized-btc",
@@ -408,9 +429,9 @@
       ]
     },
     {
-      "id": "stablecoins",
-      "name": "Fiat-anchored Stablecoins",
-      "description": "Tokens redeemable 1:1 for off-chain fiat reserves.",
+      "id": "us-stablecoins",
+      "name": "U.S. Fiat-anchored Stablecoins",
+      "description": "USD-anchored tokens redeemable 1:1 for off-chain U.S. dollar reserves.",
       "assets": [
         {
           "code": "USDC",
@@ -456,6 +477,37 @@
             }
           ]
         },
+        {
+          "code": "MGUSD",
+          "issuer": "GAIUGZZZSL47BKH27SUDZESZELFJDPE2UM52RACOSFJ7BIVBGKUEJSUZ",
+          "issuerName": "MoneyGram",
+          "issuerUrl": "https://mgusd.moneygram.com",
+          "description": "MoneyGram's USD-anchored Stellar stablecoin, used in MoneyGram's global remittance corridors for instant fiat onramps and offramps. Backed 1:1 by USD reserves at regulated financial institutions.",
+          "notes": "USD-anchored (MoneyGram)",
+          "yield7d": null,
+          "marketCap": null,
+          "venues": [
+            {
+              "name": "StellarX (MGUSD/USDC)",
+              "url": "https://www.stellarx.com/markets/MGUSD-GAIUGZZZSL47BKH27SUDZESZELFJDPE2UM52RACOSFJ7BIVBGKUEJSUZ/USDC-GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+            },
+            {
+              "name": "Aquarius (USDC → MGUSD)",
+              "url": "https://aqua.network/swap/USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN/MGUSD:GAIUGZZZSL47BKH27SUDZESZELFJDPE2UM52RACOSFJ7BIVBGKUEJSUZ/"
+            },
+            {
+              "name": "MoneyGram MGUSD",
+              "url": "https://mgusd.moneygram.com"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "intl-stablecoins",
+      "name": "International Fiat-anchored Stablecoins",
+      "description": "Non-USD stablecoins redeemable 1:1 for off-chain fiat reserves.",
+      "assets": [
         {
           "code": "EURC",
           "issuer": "GDHU6WRG4IEQXM5NZ4BMPKOXHW76MZM4Y2IEMFDVXBSDP6SJY4ITNPP2",
@@ -517,30 +569,6 @@
             {
               "name": "SushiSwap V3 (Stellar)",
               "url": "https://www.sushi.com/stellar/swap"
-            }
-          ]
-        },
-        {
-          "code": "MGUSD",
-          "issuer": "GAIUGZZZSL47BKH27SUDZESZELFJDPE2UM52RACOSFJ7BIVBGKUEJSUZ",
-          "issuerName": "MoneyGram",
-          "issuerUrl": "https://mgusd.moneygram.com",
-          "description": "MoneyGram's USD-anchored Stellar stablecoin, used in MoneyGram's global remittance corridors for instant fiat onramps and offramps. Backed 1:1 by USD reserves at regulated financial institutions.",
-          "notes": "USD-anchored (MoneyGram)",
-          "yield7d": null,
-          "marketCap": null,
-          "venues": [
-            {
-              "name": "StellarX (MGUSD/USDC)",
-              "url": "https://www.stellarx.com/markets/MGUSD-GAIUGZZZSL47BKH27SUDZESZELFJDPE2UM52RACOSFJ7BIVBGKUEJSUZ/USDC-GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
-            },
-            {
-              "name": "Aquarius (USDC → MGUSD)",
-              "url": "https://aqua.network/swap/USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN/MGUSD:GAIUGZZZSL47BKH27SUDZESZELFJDPE2UM52RACOSFJ7BIVBGKUEJSUZ/"
-            },
-            {
-              "name": "MoneyGram MGUSD",
-              "url": "https://mgusd.moneygram.com"
             }
           ]
         }

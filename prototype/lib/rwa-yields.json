@@ -103,6 +103,12 @@
       "marketCap": "$1.05M",
       "asOf": "2026-06-18",
       "source": "rwa.xyz (yield) + Stellar Expert (supply)"
+    },
+    "xaum-cc2rbg": {
+      "yield7d": null,
+      "marketCap": null,
+      "asOf": null,
+      "source": null
     }
   }
 }
