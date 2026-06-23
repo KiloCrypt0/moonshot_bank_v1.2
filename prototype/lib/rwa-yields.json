@@ -15,10 +15,10 @@
       "source": "rwa.xyz"
     },
     "ustry-gcryug": {
-      "yield7d": "2.72%",
+      "yield7d": "3.21%",
       "marketCap": null,
-      "asOf": "2026-06-18",
-      "source": "rwa.xyz"
+      "asOf": "2026-06-23",
+      "source": "Etherfuse (current issuance APY)"
     },
     "cetes-gcryug": {
       "yield7d": "4.88%",
@@ -75,16 +75,16 @@
       "source": "rwa.xyz (Stellar supply)"
     },
     "jaaa-cdv6u7": {
-      "yield7d": "2.46%",
+      "yield7d": "4.26%",
       "marketCap": "$4.9M",
-      "asOf": "2026-06-18",
-      "source": "rwa.xyz (Stellar supply, fund APY)"
+      "asOf": "2026-06-22",
+      "source": "Centrifuge (fund APY)"
     },
     "dejaaa-cc64wb": {
-      "yield7d": "2.45%",
+      "yield7d": "4.26%",
       "marketCap": "$4.9M",
-      "asOf": "2026-06-18",
-      "source": "rwa.xyz (Stellar supply, fund APY)"
+      "asOf": "2026-06-22",
+      "source": "Centrifuge (fund APY)"
     },
     "mgusd-gaiugz": {
       "yield7d": null,

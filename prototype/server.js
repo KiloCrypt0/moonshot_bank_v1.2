@@ -18,6 +18,7 @@ const TemplarAdapter = require("./lib/adapters/templar");
 const UpshiftAdapter = require("./lib/adapters/upshift");
 const LPPositionsAdapter = require("./lib/adapters/lp-positions");
 const snapshotScheduler = require("./lib/snapshot-scheduler");
+const rwaYieldFetcher = require("./lib/rwa-yield-fetcher");
 const createPublicApiRoutes = require("./lib/public-api-routes");
 const { resolveNfts } = require("./lib/nft-resolver");
 const { resolveSorobanCollectibles } = require("./lib/collectibles-resolver");
@@ -894,6 +895,13 @@ app.get("/api/v1/rwa-stats", async (req, res) => {
           entry.asOf = c.asOf || null;
           entry.source = c.source || null;
         }
+        // Layer 1.5: live issuer-API yield (rwa-yield-fetcher) overrides curated yield
+        const fresh = rwaYieldFetcher.getFreshYield(slug);
+        if (fresh && fresh.yield7d) {
+          entry.yield7d = fresh.yield7d;
+          entry.asOf = fresh.asOf || entry.asOf;
+          entry.source = fresh.source || entry.source;
+        }
         // Layer 2: live Horizon market cap (classic assets only) — overrides curated
         if (a.issuer && a.code) {
           const live = await fetchClassicMarketCap(a.code, a.issuer, xlmPrice);
@@ -929,6 +937,10 @@ app.get("/api/v1/rwa-stats", async (req, res) => {
     console.error("RWA stats error:", e);
     res.status(500).json({ error: e.message });
   }
+});
+
+app.get("/api/v1/rwa-stats/fetcher-status", (_req, res) => {
+  res.json(rwaYieldFetcher.getStatus());
 });
 
 // ── Multi-Wallet Portfolio API ───────────────────────────────────────────────
@@ -1634,6 +1646,9 @@ app.listen(PORT, () => {
 
   // Start background snapshot scheduler
   snapshotScheduler.start();
+
+  // Start hourly RWA yield refresh (Centrifuge today; more issuers to come)
+  rwaYieldFetcher.start();
 
   // Run daily downsampling at startup (and it could be scheduled via cron too)
   setTimeout(() => {
