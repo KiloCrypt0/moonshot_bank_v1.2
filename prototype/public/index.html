@@ -2139,6 +2139,15 @@
     .rwa-asset-row:hover { background: var(--bg-secondary); }
     .rwa-asset-row:first-of-type { border-top: none; }
 
+    .rwa-asset-yield-cell {
+      text-align: right;
+    }
+
+    .rwa-asset-yield-cell .rwa-stat-asof {
+      font-size: 10px;
+      margin-top: 2px;
+    }
+
     .rwa-asset-yield {
       font-size: 14px;
       font-weight: 600;
@@ -2287,6 +2296,13 @@
 
     .rwa-stat-value.muted { color: var(--text-muted); font-weight: 400; }
     .rwa-stat-value.yield { color: var(--green, #10b981); }
+
+    .rwa-stat-asof {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+    .rwa-stat-asof.stale { color: var(--orange, #f59e0b); }
 
     .rwa-section-title {
       font-size: 12px;
@@ -2704,6 +2720,19 @@
       };
     }
 
+    // Render an "as of <date>" suffix for a yield stamp. Returns "" when
+    // there's no date. Adds the .stale class once the data is over 14 days
+    // old so users see at a glance when an entry hasn't been refreshed.
+    function renderAsOf(statsAsOf, statsSource) {
+      if (!statsAsOf) return "";
+      const d = new Date(statsAsOf + "T00:00:00Z");
+      if (Number.isNaN(d.getTime())) return "";
+      const ageDays = (Date.now() - d.getTime()) / 86400000;
+      const stale = ageDays > 14;
+      const title = statsSource ? ` title="${escapeHtml(statsSource)}"` : "";
+      return `<div class="rwa-stat-asof${stale ? " stale" : ""}"${title}>as of ${escapeHtml(statsAsOf)}${stale ? " (stale)" : ""}</div>`;
+    }
+
     async function renderRwasPage() {
       const app = document.getElementById("app");
       app.innerHTML = `<div class="rwa-page"><div class="rwa-page-title">Real-World Assets on Stellar</div><div class="rwa-page-subtitle">Loading catalog…</div></div>`;
@@ -2746,8 +2775,8 @@
               ? `<span class="rwa-asset-kind-badge">Soroban</span>`
               : `<span class="rwa-asset-kind-badge">Classic</span>`;
             const yieldHtml = a.yield7d
-              ? `<div class="rwa-asset-yield">${escapeHtml(a.yield7d)}</div>`
-              : `<div class="rwa-asset-yield empty">—</div>`;
+              ? `<div class="rwa-asset-yield-cell"><div class="rwa-asset-yield">${escapeHtml(a.yield7d)}</div>${renderAsOf(a.statsAsOf, a.statsSource)}</div>`
+              : `<div class="rwa-asset-yield-cell"><div class="rwa-asset-yield empty">—</div></div>`;
             const href = `#/rwa/${rwaSlug(a)}`;
             html += `
               <a class="rwa-asset-row" href="${href}">
@@ -2805,7 +2834,7 @@
       }
 
       const yieldStatHtml = a.yield7d
-        ? `<div class="rwa-stat-value yield">${escapeHtml(a.yield7d)}</div>`
+        ? `<div class="rwa-stat-value yield">${escapeHtml(a.yield7d)}</div>${renderAsOf(a.statsAsOf, a.statsSource)}`
         : `<div class="rwa-stat-value muted">—</div>`;
       const marketCapStatHtml = a.marketCap
         ? `<div class="rwa-stat-value">${escapeHtml(a.marketCap)}</div>`
