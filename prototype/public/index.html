@@ -4680,11 +4680,19 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
             </div>
           `;
         } else if (pos.type === "vault") {
+          const collateralLabel = pos.borrow ? "Collateral" : "Deposited";
+          const borrowRow = pos.borrow
+            ? `<div class="defi-detail-item">
+                 <div class="defi-detail-label">Borrowed</div>
+                 <div class="defi-detail-value" style="color:var(--red)">${pos.borrow.amount} ${pos.borrow.asset}</div>
+               </div>`
+            : "";
           html += `
             <div class="defi-detail-item">
-              <div class="defi-detail-label">Deposited</div>
+              <div class="defi-detail-label">${collateralLabel}</div>
               <div class="defi-detail-value">${pos.deposited.amount} ${pos.deposited.asset}</div>
             </div>
+            ${borrowRow}
             <div class="defi-detail-item">
               <div class="defi-detail-label">Yield Earned</div>
               <div class="defi-detail-value" style="color:var(--green)">${pos.yield.accrued} ${pos.yield.asset}</div>
