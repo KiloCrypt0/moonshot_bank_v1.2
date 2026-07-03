@@ -10,7 +10,8 @@
     "notes": "Short tagline shown in the list view.",
     "yield7d": "Average 7-day yield as a string (e.g., '5.21%'). null hides the value.",
     "marketCap": "Market cap as a string (e.g., '$700M'). null hides the value.",
-    "venues": "Array of {name, url} for trading/liquidity venues. Stellar Expert is auto-added."
+    "venues": "Array of {name, url} for trading/liquidity venues. Stellar Expert is auto-added.",
+    "trust": "Optional trust-attribute block shown as a fact sheet on the detail page. Fields: regulator, reserves, attestation, custody, redemption, transfers, audit, stellarSince. Use null when a field truly does not apply (e.g., 'audit' for classic non-Soroban assets); use empty string when the fact exists but hasn't been researched yet — the UI distinguishes these. Values are one-line facts from public issuer disclosures, not opinions."
   },
   "categories": [
     {
@@ -43,6 +44,16 @@
           "notes": "Yield-bearing USD",
           "yield7d": null,
           "marketCap": null,
+          "trust": {
+            "regulator": "Offered outside the US only; Ondo USDY LLC is a Delaware LLC. Not available to US persons.",
+            "reserves": "Short-dated US Treasuries + bank deposits (yield accrues into per-token NAV)",
+            "attestation": "Ankura Trust as verification agent; monthly attestation reports",
+            "custody": "Bankruptcy-remote SPV; underlying at StoneX / regulated custodians",
+            "redemption": "T+1 for whitelisted subscribers via Ondo; secondary trading permissionless post-mint",
+            "transfers": "Open post-mint; KYC required to mint",
+            "audit": null,
+            "stellarSince": "2024"
+          },
           "venues": [
             {
               "name": "StellarX (USDY/USDC)",
@@ -155,6 +166,16 @@
           "notes": "U.S. T-bills MMF (USD-denominated, Soroban)",
           "yield7d": null,
           "marketCap": null,
+          "trust": {
+            "regulator": "EU short-term VNAV MMF authorized by AMF (France); Spiko is a licensed AIFM",
+            "reserves": "100% US Treasury bills and repo (money market fund)",
+            "attestation": "Chainlink Proof-of-Reserves; daily NAV published on-chain via Spiko oracle",
+            "custody": "Institutional prime custody via Spiko's regulated banking partners",
+            "redemption": "Daily NAV; T+0 subscription/redemption via Spiko app",
+            "transfers": "Public-permissioned (KYC required at mint; freely transferable after)",
+            "audit": "Spiko smart contracts audited (github.com/spiko-tech/contracts)",
+            "stellarSince": "2025"
+          },
           "venues": [
             {
               "name": "Spiko App",
@@ -337,6 +358,16 @@
           "notes": "AAA-rated CLO fund (Soroban, allowlist)",
           "yield7d": null,
           "marketCap": null,
+          "trust": {
+            "regulator": "BVI professional fund; Anemoy Ltd (BVI) as fund manager; portfolio managed by Janus Henderson",
+            "reserves": "AAA-rated CLO tranches selected by Janus Henderson (institutional credit)",
+            "attestation": "Independent fund auditor; on-chain NAV via Centrifuge indexer",
+            "custody": "Anemoy fund structure; bankruptcy-remote SPV; shares represented on-chain via Centrifuge",
+            "redemption": "Daily USDC subscriptions/redemptions for allowlisted investors (professional only)",
+            "transfers": "Allowlist required (professional investors); deJAAA is the permissionless wrapper",
+            "audit": "Centrifuge protocol audits by leading firms (see centrifuge.io/security)",
+            "stellarSince": "2025"
+          },
           "venues": [
             {
               "name": "Centrifuge App",
@@ -466,6 +497,16 @@
           "notes": "USD-anchored (Soroban SAC)",
           "yield7d": null,
           "marketCap": null,
+          "trust": {
+            "regulator": "US MSB (FinCEN) + state money transmitter licenses; MiCA EMI in the EU",
+            "reserves": "~80% short-dated US Treasuries + cash at regulated banks (1:1 backing)",
+            "attestation": "Monthly Deloitte attestation; Chainlink Proof-of-Reserves on Ethereum",
+            "custody": "BNY Mellon, State Street; Treasuries via Circle Reserve Fund (managed by BlackRock)",
+            "redemption": "Instant 1:1 via Circle Mint (institutional accounts)",
+            "transfers": "Open; issuer can freeze via Stellar admin flags",
+            "audit": null,
+            "stellarSince": "2018"
+          },
           "venues": [
             {
               "name": "Soroswap",
@@ -534,6 +575,16 @@
           "notes": "USD-pegged, RWA-collateralized (Soroban)",
           "yield7d": null,
           "marketCap": null,
+          "trust": {
+            "regulator": "None publicly disclosed",
+            "reserves": "On-chain tokenized RWA collateral (over-collateralized model, similar to DAI/USDS)",
+            "attestation": "Publicly-verifiable on-chain collateral; no third-party attestation reports yet",
+            "custody": "Smart-contract custody (collateral vaults on STBL protocol)",
+            "redemption": "Via STBL dApp; secondary DEX liquidity limited (recent deployment)",
+            "transfers": "Open (SEP-41 token)",
+            "audit": "STBL has a HackenProof bug-bounty program; Stellar contract validation status is 'unverified' on Stellar Expert",
+            "stellarSince": "2026-06"
+          },
           "venues": [
             {
               "name": "STBL DApp",

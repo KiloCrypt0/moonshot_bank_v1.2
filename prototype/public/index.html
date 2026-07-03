@@ -2304,6 +2304,54 @@
     }
     .rwa-stat-asof.stale { color: var(--orange, #f59e0b); }
 
+    .trust-attrs {
+      margin-top: 28px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: var(--bg-card);
+    }
+    .trust-attrs-header {
+      background: var(--bg-secondary);
+      padding: 10px 16px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      font-weight: 600;
+      border-bottom: 1px solid var(--border);
+    }
+    .trust-attr {
+      display: grid;
+      grid-template-columns: 150px 1fr;
+      gap: 20px;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .trust-attr:last-of-type { border-bottom: none; }
+    .trust-attr-label {
+      color: var(--text-muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .trust-attr-value { color: var(--text-primary); }
+    .trust-attr-value.na { color: var(--text-muted); }
+    .trust-attr-value.unresearched { color: var(--text-muted); font-style: italic; }
+    .trust-footer {
+      padding: 10px 16px;
+      background: var(--bg-secondary);
+      border-top: 1px solid var(--border);
+      font-size: 11px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+    @media (max-width: 600px) {
+      .trust-attr { grid-template-columns: 1fr; gap: 2px; }
+    }
+
     .rwa-section-title {
       font-size: 12px;
       text-transform: uppercase;
@@ -2718,7 +2766,44 @@
         statsAsOf: s.asOf || null,
         statsSource: s.source || null,
         tvlSource: s.tvlSource || null,
+        trust: a.trust || null,
       };
+    }
+
+    // Render an asset's trust attributes as a fact sheet. Facts are curated
+    // in rwa-catalog.json under each asset's `trust` block. Values follow a
+    // three-state convention: undefined/null = N/A (—), empty string = not
+    // yet researched (italicized), otherwise a plain fact.
+    const TRUST_FIELDS = [
+      ["regulator", "Regulator"],
+      ["reserves", "Reserves"],
+      ["attestation", "Attestation"],
+      ["custody", "Custody"],
+      ["redemption", "Redemption"],
+      ["transfers", "Transfers"],
+      ["audit", "Audit"],
+      ["stellarSince", "Stellar Since"],
+    ];
+    function renderTrustAttrs(trust) {
+      if (!trust || typeof trust !== "object") return "";
+      const rows = TRUST_FIELDS.map(([key, label]) => {
+        const raw = trust[key];
+        let cls = "", value = "";
+        if (raw === null || raw === undefined) { cls = "na"; value = "—"; }
+        else if (raw === "") { cls = "unresearched"; value = "Not yet researched"; }
+        else { value = escapeHtml(String(raw)); }
+        return `<div class="trust-attr">
+          <div class="trust-attr-label">${label}</div>
+          <div class="trust-attr-value ${cls}">${value}</div>
+        </div>`;
+      }).join("");
+      return `
+        <div class="trust-attrs">
+          <div class="trust-attrs-header">Trust Attributes</div>
+          ${rows}
+          <div class="trust-footer">Facts compiled from public issuer disclosures — not investment advice. Verify with the issuer before investing.</div>
+        </div>
+      `;
     }
 
     // Render an "as of <date>" suffix for a yield stamp. Returns "" when
@@ -2883,6 +2968,8 @@
         if (a.statsSource) parts.push(`source: ${escapeHtml(a.statsSource)}`);
         html += `<div style="font-size:12px;color:var(--text-muted);margin-top:-12px;margin-bottom:24px;">${parts.join(" · ")}</div>`;
       }
+
+      html += renderTrustAttrs(a.trust);
 
       html += `
           <div class="rwa-section-title">${isSoroban ? "Contract Address" : "Issuer Address"}</div>
