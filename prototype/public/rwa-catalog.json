@@ -28,6 +28,16 @@
           "notes": "Franklin OnChain U.S. Government Money Fund (MMF) · transfer-restricted (no DEX trading)",
           "yield7d": null,
           "marketCap": null,
+          "trust": {
+            "regulator": "SEC-registered 1940 Act US mutual fund (Franklin OnChain U.S. Government Money Fund, FOBXX)",
+            "reserves": "≥99.5% US government securities, cash, and government-collateralized repurchase agreements",
+            "attestation": "Franklin Templeton transfer agent reconciles on-chain balances daily with the official shareholder register",
+            "custody": "Franklin Templeton custody bank (BNY Mellon per FOBXX prospectus); Benji platform is system of record",
+            "redemption": "Redeem via Benji app to fiat; standard MMF T+0/T+1 processing during market hours",
+            "transfers": "Allowlist-gated (KYC-authorized wallets only); Franklin Templeton retains freeze/clawback; P2P enabled May 2025",
+            "audit": null,
+            "stellarSince": "2021"
+          },
           "venues": [
             {
               "name": "Franklin BENJI App",
@@ -78,6 +88,16 @@
           "notes": "U.S. Treasury notes (USD-denominated)",
           "yield7d": null,
           "marketCap": null,
+          "trust": {
+            "regulator": "Etherfuse operates under Mexican CNBV Resolution P090/2024; USTRY-specific US securities registration not disclosed",
+            "reserves": "US Treasury Notes held 1:1 by regulated custodians",
+            "attestation": "Periodic Proof-of-Reserves attested by third-party firm; AML and smart-contract audits published",
+            "custody": "Regulated institutional custodians; Anchorage Digital confirmed for Etherfuse suite on Stellar (2026)",
+            "redemption": "Redeemable via Etherfuse app/SDK; automatic rollovers at maturity",
+            "transfers": "Open on Stellar; standard Stellar issuer flags (freeze / clawback) retained",
+            "audit": null,
+            "stellarSince": "2024"
+          },
           "venues": [
             {
               "name": "StellarX (USTRY/USDC)",
@@ -102,6 +122,16 @@
           "notes": "SEC-registered yield-bearing security",
           "yield7d": null,
           "marketCap": null,
+          "trust": {
+            "regulator": "SEC-registered face-amount certificate under Investment Company Act of 1940 (Figure Certificate Company)",
+            "reserves": "Debt securities held by Figure Certificate Company; YLDS is an unsecured obligation of FCC",
+            "attestation": "Big-4 annual audit; reserves reported quarterly in SEC filings (Form N-CSR / 497 series)",
+            "custody": "Figure Equity Solutions, Inc. is SEC-registered transfer agent; self-custody via compatible wallets permitted",
+            "redemption": "KYC'd holders redeem via Figure Markets; as fast as same-day with credit-line-backed liquidity",
+            "transfers": "KYC/eligibility gated; only onboarded users to compatible wallets — effectively allowlisted",
+            "audit": null,
+            "stellarSince": "2026 (Stellar was the third network after Provenance and Solana)"
+          },
           "venues": [
             {
               "name": "Figure Markets",
@@ -126,6 +156,16 @@
           "notes": "U.S. T-Bills via Anemoy fund (Soroban, allowlist)",
           "yield7d": null,
           "marketCap": null,
+          "trust": {
+            "regulator": "BVI professional fund; Anemoy Ltd (BVI) as fund manager",
+            "reserves": "Short-dated US Treasury bills (0-3 month maturity)",
+            "attestation": "Independent fund auditor; on-chain NAV via Centrifuge indexer",
+            "custody": "Anemoy fund structure; bankruptcy-remote SPV; shares represented on-chain via Centrifuge",
+            "redemption": "Daily USDC subscriptions/redemptions for allowlisted investors (professional only)",
+            "transfers": "Allowlist required (professional investors); deJTRSY is the permissionless wrapper",
+            "audit": "Centrifuge protocol audits by leading firms (see centrifuge.io/security)",
+            "stellarSince": "2025"
+          },
           "venues": [
             {
               "name": "Centrifuge App",
@@ -142,6 +182,16 @@
           "notes": "deJTRSY — DeFi-wrapped JTRSY",
           "yield7d": null,
           "marketCap": null,
+          "trust": {
+            "regulator": "BVI professional fund (underlying JTRSY); Open Market Foundation issues the permissionless wrapper",
+            "reserves": "Short-dated US T-Bills (mirrors JTRSY — same fund, deJTRSY is a 1:1 wrapper)",
+            "attestation": "Independent fund auditor; on-chain NAV via Centrifuge indexer",
+            "custody": "Anemoy fund structure; deJTRSY represents 1:1 wrapped JTRSY shares",
+            "redemption": "Unwrap to JTRSY (allowlisted) then via Centrifuge; secondary DEX liquidity on Stellar",
+            "transfers": "Open (permissionless — no allowlist)",
+            "audit": "Centrifuge protocol audits + Open Market Foundation wrapper contract",
+            "stellarSince": "2025"
+          },
           "venues": [
             {
               "name": "Centrifuge App",
@@ -200,6 +250,16 @@
           "notes": "Sovereign bond, 1:1 U.S. T-Bill-backed",
           "yield7d": null,
           "marketCap": null,
+          "trust": {
+            "regulator": "Sovereign obligation of the Republic of the Marshall Islands under NY law indenture (Brady bond structure); explicit sovereign-immunity waiver",
+            "reserves": "Short-duration US Treasuries pledged 1:1",
+            "attestation": "Public reserve attestation cadence not yet documented; Surus Trust administers collateral",
+            "custody": "Surus Trust Company (US trustee, custodian, collateral agent); Anchorage Digital added as institutional custodian in 2026",
+            "redemption": "Par-redemption and liquidation administered by trustee; UCC first-priority security interest for holders",
+            "transfers": "Distributed via Lomalo wallet for RMI's ENRA UBI program; broader transfer policy not publicly detailed",
+            "audit": null,
+            "stellarSince": "2025"
+          },
           "venues": [
             {
               "name": "USDM1 Bond Site",
@@ -231,6 +291,16 @@
           "notes": "Mexican T-bills (MXN-denominated)",
           "yield7d": null,
           "marketCap": null,
+          "trust": {
+            "regulator": "Mexican fintech operating under CNBV Resolution P090/2024 (tokens deemed not to require prior authorization)",
+            "reserves": "Mexican federal treasury certificates (Cetes), MXN-denominated",
+            "attestation": "Periodic third-party Proof-of-Reserves attestations published by Etherfuse",
+            "custody": "BBVA Mexico with crypto custody via Kuspit Casa de Bolsa; underlying bonds at INDEVAL; Anchorage Digital custody added 2026",
+            "redemption": "Instant redemption via Etherfuse app/SDK; yield compounds into token value",
+            "transfers": "Open on Stellar; standard Stellar issuer authorization/clawback flags available",
+            "audit": null,
+            "stellarSince": "2024"
+          },
           "venues": [
             {
               "name": "StellarX (CETES/USDC)",
@@ -255,6 +325,16 @@
           "notes": "Brazilian Treasury bonds (BRL-denominated)",
           "yield7d": null,
           "marketCap": null,
+          "trust": {
+            "regulator": "Etherfuse operates under Mexican CNBV Resolution P090/2024; TESOURO Brazilian CVM registration not confirmed (CVM tokenized-securities rules still evolving)",
+            "reserves": "Brazilian Tesouro Nacional bonds tracking the Selic rate, BRL-denominated",
+            "attestation": "Third-party Proof-of-Reserves reports on Etherfuse's platform (same framework as CETES/USTRY)",
+            "custody": "Regulated custodian (specific Brazilian custodian not publicly named)",
+            "redemption": "Redeemable via Etherfuse app; interest accrues to maturity based on Selic",
+            "transfers": "Open on Stellar; issuer controls at Stellar asset layer",
+            "audit": null,
+            "stellarSince": "2024"
+          },
           "venues": [
             {
               "name": "StellarX (TESOURO/USDC)",
@@ -279,6 +359,16 @@
           "notes": "EU T-bills (EUR-denominated, Soroban)",
           "yield7d": null,
           "marketCap": null,
+          "trust": {
+            "regulator": "EU short-term VNAV MMF authorized by AMF (France); Spiko is a licensed AIFM",
+            "reserves": "French and Eurozone government Treasury bills (money market fund, EUR-denominated)",
+            "attestation": "Chainlink Proof-of-Reserves; daily NAV published on-chain via Spiko oracle",
+            "custody": "Institutional prime custody via Spiko's regulated banking partners",
+            "redemption": "Daily NAV; T+0 subscription/redemption via Spiko app",
+            "transfers": "Public-permissioned (KYC required at mint; freely transferable after)",
+            "audit": "Spiko smart contracts audited (github.com/spiko-tech/contracts)",
+            "stellarSince": "2025"
+          },
           "venues": [
             {
               "name": "Soroswap",
@@ -303,6 +393,16 @@
           "notes": "UK T-bills (GBP-denominated, Soroban)",
           "yield7d": null,
           "marketCap": null,
+          "trust": {
+            "regulator": "EU short-term VNAV MMF authorized by AMF (France); Spiko is a licensed AIFM",
+            "reserves": "UK Treasury bills (money market fund, GBP-denominated)",
+            "attestation": "Chainlink Proof-of-Reserves; daily NAV published on-chain via Spiko oracle",
+            "custody": "Institutional prime custody via Spiko's regulated banking partners",
+            "redemption": "Daily NAV; T+0 subscription/redemption via Spiko app",
+            "transfers": "Public-permissioned (KYC required at mint; freely transferable after)",
+            "audit": "Spiko smart contracts audited (github.com/spiko-tech/contracts)",
+            "stellarSince": "2025"
+          },
           "venues": [
             {
               "name": "Soroswap",
@@ -327,6 +427,16 @@
           "notes": "Amundi overnight swap fund (EUR-denominated, Soroban)",
           "yield7d": null,
           "marketCap": null,
+          "trust": {
+            "regulator": "EU money market fund; Spiko-tokenized share class on Stellar; portfolio managed by Amundi",
+            "reserves": "EUR overnight rates via swap exposure (Amundi-managed short-term MMF)",
+            "attestation": "Chainlink Proof-of-Reserves; daily NAV published on-chain via Spiko oracle",
+            "custody": "Amundi institutional custody (Europe's largest asset manager)",
+            "redemption": "Daily NAV; T+0 subscription/redemption via Spiko app",
+            "transfers": "Public-permissioned (KYC required at mint; freely transferable after)",
+            "audit": "Spiko smart contracts audited (github.com/spiko-tech/contracts)",
+            "stellarSince": "2025"
+          },
           "venues": [
             {
               "name": "Spiko App",
@@ -384,6 +494,16 @@
           "notes": "deJAAA — DeFi-wrapped JAAA",
           "yield7d": null,
           "marketCap": null,
+          "trust": {
+            "regulator": "BVI professional fund (underlying JAAA); Open Market Foundation issues the permissionless wrapper",
+            "reserves": "AAA-rated CLO tranches (mirrors JAAA — same fund; deJAAA is a 1:1 wrapper)",
+            "attestation": "Independent fund auditor; on-chain NAV via Centrifuge indexer",
+            "custody": "Anemoy fund structure; deJAAA represents 1:1 wrapped JAAA shares",
+            "redemption": "Unwrap to JAAA (allowlisted) then via Centrifuge; secondary DEX liquidity on Stellar",
+            "transfers": "Open (permissionless — no allowlist)",
+            "audit": "Centrifuge protocol audits + Open Market Foundation wrapper contract",
+            "stellarSince": "2025"
+          },
           "venues": [
             {
               "name": "Centrifuge App",
@@ -415,6 +535,16 @@
           "notes": "1 token = 1 troy oz of LBMA-accredited gold (Soroban)",
           "yield7d": null,
           "marketCap": null,
+          "trust": {
+            "regulator": "Matrixdock is a Matrixport subsidiary (Hong Kong TCSP + Singapore entities); XAUM-specific single-jurisdiction license not publicly documented",
+            "reserves": "1 token = 1 troy oz of 99.99% LBMA-accredited allocated gold bars",
+            "attestation": "Independent physical audits by Bureau Veritas; regular vault asset statements",
+            "custody": "Allocated bars vaulted at Malca-Amit (Le Freeport, Singapore) and Brink's / Malca-Amit facilities in Hong Kong",
+            "redemption": "Physical bar redemption in Singapore and Hong Kong; 1 kg bar minimum (institutional bullion standard)",
+            "transfers": "Open on Stellar; issuer retains standard freeze/clawback for AML compliance",
+            "audit": "Contract validation status is 'unverified' on Stellar Expert (contract auditor not publicly disclosed)",
+            "stellarSince": "2026"
+          },
           "venues": [
             {
               "name": "Matrixdock",
@@ -442,6 +572,16 @@
           "notes": "Bitcoin-denominated (Soroban)",
           "yield7d": null,
           "marketCap": null,
+          "trust": {
+            "regulator": "DeFi protocol — no single fiat-money-issuer license framework applies",
+            "reserves": "1:1 BTC (native and wrapped BTC variants) held by third-party institutional custodians",
+            "attestation": "Chainlink Proof-of-Reserve feed live on Ethereum (Sept 2025); Stellar-specific PoR to be verified",
+            "custody": "Institutional custodians disclosed by Solv across variants: Copper, Ceffu, Cobo, Fireblocks, Hex Trust (non-issuer custody)",
+            "redemption": "On-chain burn-to-redeem for underlying BTC via Solv app; subject to protocol/vault windows",
+            "transfers": "Open transfers; protocol admin retains pause/upgrade rights via governance keys",
+            "audit": "",
+            "stellarSince": "2025"
+          },
           "venues": [
             {
               "name": "Soroswap",
@@ -463,9 +603,19 @@
           "issuerName": "Solv Protocol",
           "issuerUrl": "https://solv.finance",
           "description": "Yield-bearing variant of SolvBTC. The exchange rate vs SolvBTC drifts upward over time to reflect accrued yield from Babylon staking and other BTC yield sources.",
-          "notes": "SolvBTC.BBN — yield-bearing BTC",
+          "notes": "SolvBTC.BBN — yield-bearing BTC (Stellar yield distribution pending LayerZero)",
           "yield7d": null,
           "marketCap": null,
+          "trust": {
+            "regulator": "DeFi protocol — no single fiat-money-issuer license framework applies",
+            "reserves": "SolvBTC (itself 1:1 BTC) staked into Babylon Bitcoin staking; accrues Babylon yield + DeFi yield elsewhere",
+            "attestation": "Inherits SolvBTC's Chainlink PoR upstream; xSolvBTC-specific attestation not separately published",
+            "custody": "Underlying BTC at SolvBTC's institutional custodians; staking positions via Babylon protocol contracts",
+            "redemption": "Unstake xSolvBTC → SolvBTC via Solv app (subject to Babylon unbonding period), then redeem SolvBTC for BTC",
+            "transfers": "Open transfers; protocol admin retains pause capability",
+            "audit": "",
+            "stellarSince": "2025"
+          },
           "venues": [
             {
               "name": "Soroswap",
@@ -531,6 +681,16 @@
           "notes": "USD-anchored (Soroban)",
           "yield7d": null,
           "marketCap": null,
+          "trust": {
+            "regulator": "Issued by Paxos Trust Company — NYDFS-supervised NY limited-purpose trust (Paxos also received OCC national trust approval in 2025)",
+            "reserves": "100% USD deposits, short-dated US Treasuries and cash equivalents; segregated in a bankruptcy-remote trust account",
+            "attestation": "Monthly public Reserve Report and third-party attestation by WithumSmith+Brown (Withum)",
+            "custody": "Reserves held at US-regulated banks and via Paxos trust; Paxos as custodian/issuer",
+            "redemption": "1:1 USD redemption via Paxos direct clients; retail redeem through PayPal / Venmo apps",
+            "transfers": "Open peer-to-peer transfers on Stellar; Paxos retains freeze/clawback authority per NYDFS rules",
+            "audit": "",
+            "stellarSince": "2025"
+          },
           "venues": [
             {
               "name": "Soroswap",
@@ -551,6 +711,16 @@
           "notes": "USD-anchored (MoneyGram)",
           "yield7d": null,
           "marketCap": null,
+          "trust": {
+            "regulator": "Issued by Bridge (a Stripe company) on MoneyGram's behalf; Bridge holds US state money-transmitter licenses",
+            "reserves": "USD reserves managed via M0 smart-contract infrastructure (M0 backs its token with short-dated USTs and cash)",
+            "attestation": "Reserve attestations inherited from M0's reporting; specific auditor / cadence for MGUSD not publicly detailed",
+            "custody": "Treasury float held in Fireblocks-secured institutional wallets; underlying reserves via M0 / Bridge",
+            "redemption": "In-app cash-out at ~500,000 MoneyGram retail locations globally plus on/off-ramps via Bridge",
+            "transfers": "Open Stellar Classic asset; issuer/Bridge retains freeze/clawback for compliance",
+            "audit": null,
+            "stellarSince": "2026"
+          },
           "venues": [
             {
               "name": "StellarX (MGUSD/USDC)",
@@ -616,6 +786,16 @@
           "notes": "EUR-anchored",
           "yield7d": null,
           "marketCap": null,
+          "trust": {
+            "regulator": "Issued by Circle Mint Europe SAS — Electronic Money Institution licensed by France's ACPR under MiCA (E-Money Token regime)",
+            "reserves": "100% EUR-denominated cash and short-dated EU sovereign equivalents at regulated EEA banks",
+            "attestation": "Monthly third-party attestations by Grant Thornton",
+            "custody": "Reserves at regulated EEA financial institutions; Circle-managed segregated accounts",
+            "redemption": "1:1 EUR redemption via Circle Mint accounts (institutional/qualified partners); no direct retail redemption",
+            "transfers": "Open on Stellar; Circle can freeze/blacklist addresses per compliance obligations",
+            "audit": null,
+            "stellarSince": "2023"
+          },
           "venues": [
             {
               "name": "StellarX (EURC/USDC)",
@@ -640,6 +820,16 @@
           "notes": "EUR-anchored (Soroban)",
           "yield7d": null,
           "marketCap": null,
+          "trust": {
+            "regulator": "Issued by AllUnity GmbH — BaFin-licensed Electronic Money Institution (granted July 2025); MiCAR-compliant e-money token",
+            "reserves": "100% euro reserves at consortium of European reserve banks (Metzler Bank named among partners)",
+            "attestation": "Reserve reporting under MiCAR EMT rules; specific auditor for public attestations not publicly named",
+            "custody": "BaFin-regulated German custodian Tangany handles wallet/custody infrastructure; reserves at European banks",
+            "redemption": "1:1 EUR par redemption right guaranteed to holders under MiCAR EMT framework",
+            "transfers": "Open on Stellar; issuer retains freeze capability required by MiCAR / EMI compliance",
+            "audit": "",
+            "stellarSince": "2026"
+          },
           "venues": [
             {
               "name": "Soroswap",
@@ -660,6 +850,16 @@
           "notes": "EUR-anchored (Soroban)",
           "yield7d": null,
           "marketCap": null,
+          "trust": {
+            "regulator": "Issued by Societe Generale-FORGE — ACPR-licensed EMI (MiCAR e-money token) plus MiFID II investment firm and AMF-registered DASP",
+            "reserves": "100% EUR cash / equivalent reserves held at credit institutions; MiCAR EMT reserve rules apply",
+            "attestation": "MiCAR EMT reserve reporting; specific public auditor cadence for EURCV not publicly confirmed",
+            "custody": "SG-FORGE-managed reserves at regulated banking partners (parent Societe Generale group)",
+            "redemption": "1:1 EUR par redemption at face value guaranteed under MiCAR EMT regime",
+            "transfers": "Whitelist-gated at issuance — holders/wallets must be onboarded/whitelisted by SG-FORGE; freeze-able",
+            "audit": "",
+            "stellarSince": "2025"
+          },
           "venues": [
             {
               "name": "Soroswap",
