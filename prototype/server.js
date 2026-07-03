@@ -39,6 +39,30 @@ app.use(express.static(path.join(__dirname, "public")));
 const { rateLimitMiddleware } = require("./lib/api-keys");
 app.use("/api/v1", rateLimitMiddleware);
 
+// Same-origin gate for endpoints we don't want casually integrated by external
+// callers (leaderboards + wallet-tracking POST). The SPA hits these from the
+// same origin so it works transparently; external scrapers/apps get 403.
+// Not a hard defense — Origin/Referer can be spoofed — but a real speedbump
+// against accidental integration.
+const ALLOWED_ORIGINS = new Set([
+  "https://stellarscope.xyz",
+  "https://www.stellarscope.xyz",
+  "https://stellarscope-production.up.railway.app",
+  "http://localhost:4000",
+  "http://127.0.0.1:4000",
+]);
+function sameOriginOnly(req, res, next) {
+  const origin = req.get("Origin");
+  const referer = req.get("Referer");
+  const refererOrigin = referer ? referer.split("/").slice(0, 3).join("/") : null;
+  const ok = (origin && ALLOWED_ORIGINS.has(origin))
+          || (refererOrigin && ALLOWED_ORIGINS.has(refererOrigin));
+  if (ok) return next();
+  return res.status(403).json({
+    error: "This endpoint is only reachable from the Stellar Scope UI.",
+  });
+}
+
 // Mainnet only — read-only portfolio tracker
 const HORIZON_URL = "https://horizon.stellar.org";
 
@@ -877,6 +901,8 @@ async function fetchClassicMarketCap(code, issuer, xlmPrice) {
 }
 
 app.get("/api/v1/rwa-stats", async (req, res) => {
+  // Match the server-side TTL so downstream callers can cache too.
+  res.set("Cache-Control", `public, max-age=${RWA_STATS_TTL / 1000}`);
   if (rwaStatsCache.payload && Date.now() - rwaStatsCache.ts < RWA_STATS_TTL) {
     return res.json(rwaStatsCache.payload);
   }
@@ -976,7 +1002,7 @@ app.get("/api/v1/wallets", (req, res) => {
 });
 
 // Add a wallet to the portfolio
-app.post("/api/v1/wallets", (req, res) => {
+app.post("/api/v1/wallets", sameOriginOnly, (req, res) => {
   try {
     const { address, label, tier } = req.body || {};
     if (!address || !address.startsWith("G") || address.length !== 56) {
@@ -1304,7 +1330,7 @@ const EXCLUDED_WHALES = new Set([
   "GBFZPAHO24P7ZVZCMI5SXZR53UYD325OWSSWWHHVLBNN56LU5YZJJFNP",
 ]);
 
-app.get("/api/v1/whales", async (req, res) => {
+app.get("/api/v1/whales", sameOriginOnly, async (req, res) => {
   try {
     // Fetch extra to have enough after filtering
     const response = await fetch("https://api.stellar.expert/explorer/public/asset/XLM/holders?order=desc&limit=40");
@@ -1506,7 +1532,7 @@ async function computePortfolioWhales() {
 computePortfolioWhales();
 setInterval(computePortfolioWhales, PORTFOLIO_WHALE_TTL);
 
-app.get("/api/v1/portfolio-whales", async (req, res) => {
+app.get("/api/v1/portfolio-whales", sameOriginOnly, async (req, res) => {
   if (req.query.refresh === "1" && !portfolioWhaleComputing) {
     computePortfolioWhales();
   }
