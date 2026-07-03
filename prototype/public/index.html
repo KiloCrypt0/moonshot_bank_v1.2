@@ -1010,6 +1010,16 @@
       justify-content: flex-end;
       margin-top: 16px;
     }
+    .share-modal-alt {
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
 
     .share-banner {
       background: var(--bg-card);
@@ -2957,6 +2967,9 @@
           <div class="cp-subtitle">
             Publish a shareable page at <span style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace">stellarscope.xyz/p/&lt;slug&gt;</span>
             that shows your Stellar portfolio. You'll sign a message with your wallet to prove ownership — no funds move, no gas fee.
+            <div style="margin-top:10px;font-size:12px;color:var(--text-muted)">
+              Just want to send a one-off link to a friend? The <strong>Share</strong> button in Portfolio generates a temporary URL that doesn't require signing.
+            </div>
           </div>
 
           <div class="cp-card">
@@ -3718,6 +3731,10 @@
           <div class="share-modal-actions">
             <button class="share-btn" id="shareCopyBtn">Copy link</button>
             <button class="share-btn" id="shareCloseBtn">Close</button>
+          </div>
+          <div class="share-modal-alt">
+            <span style="color:var(--text-muted);font-size:12px">Want a persistent URL with your name?</span>
+            <a href="#/profile" onclick="event.stopPropagation();document.querySelector('.share-modal-backdrop')?.remove();switchPage('profile');" style="color:var(--accent);font-size:12px;text-decoration:none;font-weight:600">Create a Profile →</a>
           </div>
         </div>
       `;
