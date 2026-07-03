@@ -163,6 +163,27 @@ async function getLPTotalSupply(poolContractId) {
   }
 }
 
+/**
+ * Get a SEP-41 token's total_supply, returned as a Number of whole tokens
+ * (already divided by 10^decimals). Returns null on failure so callers can
+ * fall back gracefully rather than treating 0 as authoritative.
+ */
+async function getTokenSupply(contractId, decimals = 7) {
+  try {
+    const result = await simulateContractCall(contractId, "total_supply");
+    if (!result) return null;
+    const raw = BigInt(scValToNative(result).toString());
+    if (raw === 0n) return 0;
+    const divisor = BigInt(10) ** BigInt(decimals);
+    const whole = raw / divisor;
+    const frac = Number(raw % divisor) / Number(divisor);
+    return Number(whole) + frac;
+  } catch (e) {
+    console.warn(`[soroban-rpc] getTokenSupply(${contractId}) failed:`, e.message);
+    return null;
+  }
+}
+
 module.exports = {
   server,
   SOROBAN_RPC_URL,
@@ -175,4 +196,5 @@ module.exports = {
   getPoolReserves,
   getLPBalance,
   getLPTotalSupply,
+  getTokenSupply,
 };

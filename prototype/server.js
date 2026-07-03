@@ -895,12 +895,21 @@ app.get("/api/v1/rwa-stats", async (req, res) => {
           entry.asOf = c.asOf || null;
           entry.source = c.source || null;
         }
-        // Layer 1.5: live issuer-API yield (rwa-yield-fetcher) overrides curated yield
+        // Layer 1.5: live issuer-API yield + Stellar TVL (rwa-yield-fetcher)
+        // overrides curated values. tvl and yield7d may come from the same or
+        // different fetchers; both share the fetcher's asOf.
         const fresh = rwaYieldFetcher.getFreshYield(slug);
-        if (fresh && fresh.yield7d) {
-          entry.yield7d = fresh.yield7d;
-          entry.asOf = fresh.asOf || entry.asOf;
-          entry.source = fresh.source || entry.source;
+        if (fresh) {
+          if (fresh.yield7d) {
+            entry.yield7d = fresh.yield7d;
+            entry.source = fresh.source || entry.source;
+          }
+          if (fresh.tvl) {
+            entry.marketCap = fresh.tvl;
+            entry.supplyTokens = fresh.supplyTokens ?? entry.supplyTokens;
+            entry.tvlSource = fresh.tvlSource || null;
+          }
+          if (fresh.asOf) entry.asOf = fresh.asOf;
         }
         // Layer 2: live Horizon market cap (classic assets only) — overrides curated
         if (a.issuer && a.code) {

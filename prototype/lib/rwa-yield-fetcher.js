@@ -1,50 +1,109 @@
 /**
- * RWA Yield Fetcher
+ * RWA Yield & TVL Fetcher
  *
- * Periodically pulls live yield values from each issuer's API and exposes a
- * lookup keyed by the same slug shape used in rwa-yields.json
- * (lowercased {code}-{first6charsOfIssuerOrContract}).
+ * Periodically pulls live yield and Stellar-only TVL values from each issuer's
+ * API and overlays them on the curated rwa-yields.json (which remains the
+ * durable fallback).
  *
  * Design:
  *   - One fetcher function per issuer. Each may return values for multiple
- *     slugs in a single network call (e.g. Centrifuge returns JAAA + JTRSY +
- *     their deFi-wrapped variants in one GraphQL query).
+ *     slugs in a single network call.
+ *   - Each returned entry can carry any subset of: yield7d, tvl, supplyTokens,
+ *     asOf, source, tvlSource. Multiple fetchers writing to the same slug are
+ *     merged (last-write-wins per field).
+ *   - Additional non-issuer pass: `fetchSorobanSupplies` queries each Soroban
+ *     token's on-chain total_supply and prices it via a per-token price hint
+ *     (USD peg, BTC, gold, EUR, etc.). Covers tokens whose issuer doesn't
+ *     surface a public supply API.
  *   - Hourly background refresh. Per-slug 24h grace window keeps stale
  *     fetched values alive across short outages; beyond that, server.js falls
- *     back to the curated values in rwa-yields.json.
- *   - Pure in-memory cache — no disk writes. The curated JSON remains the
- *     human-edited source of truth and the durable fallback.
+ *     back to the curated JSON.
  *
  * Adding an issuer:
- *   1. Write an async function returning { "<slug>": { yield7d, asOf, source } }
+ *   1. Write an async function returning { "<slug>": { yield7d?, tvl?, asOf, source } }
  *      (or {} on failure — never throw past the boundary).
- *   2. Add it to ISSUER_FETCHERS.
+ *   2. Add it to REFRESHERS.
  */
 
-const REFRESH_INTERVAL = 60 * 60_000; // 1 hour
-const STALE_GRACE = 24 * 60 * 60_000; // serve fetched values up to 24h old if a refresh fails
+const { getTokenSupply } = require("./soroban-rpc");
 
-let cache = new Map(); // slug -> { ts, value: { yield7d, asOf, source } }
+const REFRESH_INTERVAL = 60 * 60_000; // 1 hour
+const STALE_GRACE = 24 * 60 * 60_000; // serve fetched values up to 24h if refresh fails
+
+let cache = new Map(); // slug -> { ts, value: { yield7d?, tvl?, supplyTokens?, asOf, source? } }
 let lastRefreshTs = 0;
 let lastRefreshSummary = null;
 
-// ── Centrifuge ──────────────────────────────────────────────────────────────
-// Public read-only GraphQL endpoint (https://api.centrifuge.io). Token ids are
-// chain-prefixed but the yield data is fund-wide, so a single query covers
-// every chain's wrapper of a given fund.
-//
-// yield7d365 is a fixed-point integer scaled by 1e27 (DeFi "ray" precision).
-// Divide by 1e27 to get the fractional annualized yield, multiply by 100 for %.
+// ── Format helper ───────────────────────────────────────────────────────────
+
+function formatBigUSD(n) {
+  if (!Number.isFinite(n) || n <= 0) return null;
+  if (n >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
+  if (n >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `$${(n / 1e3).toFixed(1)}K`;
+  return `$${n.toFixed(0)}`;
+}
+
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+// ── Price feeds (BTC, gold, EUR, GBP) ───────────────────────────────────────
+// Cached alongside the hourly refresh so all TVL numbers in a given cycle use
+// the same prices. Fall back to `null` on failure; per-slug pricing then skips
+// that slug rather than emit a wrong number.
+
+const _priceCache = { btcUsd: null, goldUsdPerOz: null, eurUsd: null, gbpUsd: null, ts: 0 };
+
+async function refreshPrices() {
+  const [cgRes, fxRes] = await Promise.allSettled([
+    fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,pax-gold&vs_currencies=usd"),
+    fetch("https://api.frankfurter.dev/v1/latest?base=USD&symbols=EUR,GBP"),
+  ]);
+  if (cgRes.status === "fulfilled" && cgRes.value.ok) {
+    try {
+      const j = await cgRes.value.json();
+      if (Number.isFinite(j?.bitcoin?.usd)) _priceCache.btcUsd = j.bitcoin.usd;
+      // PAXG is 1 troy oz LBMA-backed — the token price is spot gold per oz.
+      if (Number.isFinite(j?.["pax-gold"]?.usd)) _priceCache.goldUsdPerOz = j["pax-gold"].usd;
+    } catch (e) {
+      console.warn("[rwa-yield-fetcher] CoinGecko parse failed:", e.message);
+    }
+  }
+  if (fxRes.status === "fulfilled" && fxRes.value.ok) {
+    try {
+      const j = await fxRes.value.json();
+      // Frankfurter returns rates as "1 USD = N X", so USD/X = 1 / (1 X per USD).
+      if (Number.isFinite(j?.rates?.EUR) && j.rates.EUR > 0) _priceCache.eurUsd = 1 / j.rates.EUR;
+      if (Number.isFinite(j?.rates?.GBP) && j.rates.GBP > 0) _priceCache.gbpUsd = 1 / j.rates.GBP;
+    } catch (e) {
+      console.warn("[rwa-yield-fetcher] Frankfurter parse failed:", e.message);
+    }
+  }
+  _priceCache.ts = Date.now();
+}
+
+// ── Centrifuge (yield + tvl) ────────────────────────────────────────────────
+// Public read-only GraphQL endpoint. `yield7d365` is a fixed-point BigInt
+// scaled by 1e27 (ray precision). `tokenPrice` is a BigInt scaled by 1e18.
+// For Stellar-only TVL we query the Stellar Soroban contract's total_supply
+// (Centrifuge's tokens are chain-specific wrappers of the same fund).
 
 const CENTRIFUGE_API = "https://api.centrifuge.io/";
 const CENTRIFUGE_YIELD_SCALE = 1e27;
+const CENTRIFUGE_PRICE_SCALE = 1e18;
 
-// Map Centrifuge token symbols → slugs that match rwa-yields.json. JAAA/JTRSY
-// have allowlist-gated and DeFi-wrapped variants on Stellar; both share the
-// underlying fund's APY.
+// Map Centrifuge symbol → array of { slug, stellarContractId, decimals } for
+// each on-Stellar wrapper of that fund.
 const CENTRIFUGE_TOKENS = {
-  JAAA:  ["jaaa-cdv6u7", "dejaaa-cc64wb"],
-  JTRSY: ["jtrsy-cbhoek", "dejtrsy-cbi7uc"],
+  JAAA: [
+    { slug: "jaaa-cdv6u7",   stellarContractId: "CDV6U7OEVY6KUEJ4WNS63AYB6RFU3BAE7AZJOQ7LPH447C6NWUXEZZSO", decimals: 18 },
+    { slug: "dejaaa-cc64wb", stellarContractId: "CC64WBDGS6QQP22QTTIACYIXT3WF7BBQEYOQPLTP7GTKYY7PZ74QYGSL", decimals: 18 },
+  ],
+  JTRSY: [
+    { slug: "jtrsy-cbhoek",   stellarContractId: "CBHOEKLWTB6HR2A3IXHIIMQG5FOXWXS6EG4Q5YJDRPMXPCX7M24CYR2O", decimals: 18 },
+    { slug: "dejtrsy-cbi7uc", stellarContractId: "CBI7UCH5KGSVQRO5H4SUCZUTZABCITZLRHQQZTWL2TK4RZ72TAR6IHRV", decimals: 18 },
+  ],
 };
 
 async function fetchCentrifuge() {
@@ -58,13 +117,29 @@ async function fetchCentrifuge() {
 
   const out = {};
   await Promise.all(tokens.map(async (t) => {
-    const slugs = CENTRIFUGE_TOKENS[t.symbol];
-    if (!slugs) return;
+    const wrappers = CENTRIFUGE_TOKENS[t.symbol];
+    if (!wrappers) return;
     const snap = await fetchLatestSnapshot(t.id);
     if (!snap) return;
-    const value = formatCentrifugeYield(snap);
-    if (!value) return;
-    for (const slug of slugs) out[slug] = value;
+    // Per-share USD price (BigInt / 1e18). Fund-wide, applies to all wrappers.
+    let pricePerShare = null;
+    try {
+      pricePerShare = Number(BigInt(snap.tokenPrice)) / CENTRIFUGE_PRICE_SCALE;
+    } catch { /* leave null */ }
+    const yieldEntry = formatCentrifugeYield(snap);
+
+    // Query on-chain supply for each Stellar wrapper independently.
+    await Promise.all(wrappers.map(async ({ slug, stellarContractId, decimals }) => {
+      const supply = await getTokenSupply(stellarContractId, decimals);
+      const entry = { ...(yieldEntry || {}) };
+      if (Number.isFinite(supply) && Number.isFinite(pricePerShare)) {
+        const usd = supply * pricePerShare;
+        entry.tvl = formatBigUSD(usd);
+        entry.supplyTokens = supply;
+        entry.tvlSource = "Centrifuge (Stellar supply × fund NAV)";
+      }
+      if (Object.keys(entry).length > 0) out[slug] = entry;
+    }));
   }));
   return out;
 }
@@ -76,7 +151,7 @@ async function fetchLatestSnapshot(tokenId) {
       orderBy: "timestamp",
       orderDirection: "desc",
       limit: 1
-    ) { items { timestamp yield7d365 } }
+    ) { items { timestamp yield7d365 tokenPrice } }
   }`;
   const items = await centrifugeQuery(q).then(d => d?.tokenSnapshots?.items || []);
   return items[0] || null;
@@ -85,7 +160,6 @@ async function fetchLatestSnapshot(tokenId) {
 function formatCentrifugeYield(snap) {
   const raw = snap?.yield7d365;
   if (raw == null) return null;
-  // BigInt because the integer is well past 2^53. Convert to percent as Number.
   let pct;
   try {
     pct = Number(BigInt(raw)) / CENTRIFUGE_YIELD_SCALE * 100;
@@ -96,7 +170,7 @@ function formatCentrifugeYield(snap) {
   const ts = parseInt(snap.timestamp, 10);
   const asOf = Number.isFinite(ts)
     ? new Date(ts).toISOString().slice(0, 10)
-    : new Date().toISOString().slice(0, 10);
+    : todayISO();
   return {
     yield7d: `${pct.toFixed(2)}%`,
     asOf,
@@ -116,48 +190,79 @@ async function centrifugeQuery(query) {
   return json.data;
 }
 
-// ── Spiko ───────────────────────────────────────────────────────────────────
-// Public REST API, no auth. Per-share-class yield endpoint returns
-// daily/weekly/monthly yields as fractional decimals (e.g. "0.0313" = 3.13%).
-// "weeklyYield" matches our "yield7d annualized" semantic.
+// ── Spiko (yield + tvl) ─────────────────────────────────────────────────────
+// Public REST API, no auth. Yield endpoint returns weeklyYield as a fractional
+// decimal. Totals endpoint returns NAV per share in the fund's currency (USD
+// for USTBL, EUR for EUTBL/SAFO, GBP for UKTBL). Stellar-only TVL = on-chain
+// Stellar supply × per-share NAV × FX-to-USD.
 
 const SPIKO_API = "https://public-api.spiko.io/v0";
 
-const SPIKO_SYMBOLS = {
-  USTBL: "ustbl-caruux",
-  EUTBL: "eutbl-cbgv2q",
-  UKTBL: "uktbl-cdt3ku",
-  SAFO:  "safo-cdgsc6",
+const SPIKO_TOKENS = {
+  USTBL: { slug: "ustbl-caruux", stellarContractId: "CARUUX2FZNPH6DGJOEUFSIUQWYHNL5AVDV7PMVSHWL7OBYIBFC76F4TO", decimals: 5, fx: "USD" },
+  EUTBL: { slug: "eutbl-cbgv2q", stellarContractId: "CBGV2QFQBBGEQRUKUMCPO3SZOHDDYO6SCP5CH6TW7EALKVHCXTMWDDOF", decimals: 5, fx: "EUR" },
+  UKTBL: { slug: "uktbl-cdt3ku", stellarContractId: "CDT3KU6TQZNOHKNOHNAFFDQZDURVC3MSTL4ML7TUTZGNOPBZCLABP4FR", decimals: 5, fx: "GBP" },
+  SAFO:  { slug: "safo-cdgsc6",  stellarContractId: "CDGSC6BA4TCAOVSFQCUEHDMOIIHYYVNYBT6YEARS4MX3ITAHUINVGQHX", decimals: 5, fx: "EUR" },
 };
+
+function _spikoFxToUsd(fx) {
+  if (fx === "USD") return 1;
+  if (fx === "EUR") return _priceCache.eurUsd;
+  if (fx === "GBP") return _priceCache.gbpUsd;
+  return null;
+}
 
 async function fetchSpiko() {
   const out = {};
-  await Promise.all(Object.entries(SPIKO_SYMBOLS).map(async ([symbol, slug]) => {
+  await Promise.all(Object.entries(SPIKO_TOKENS).map(async ([symbol, cfg]) => {
+    const entry = {};
+    // Yield
     try {
       const res = await fetch(`${SPIKO_API}/share-classes/${symbol}/yield`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      const wy = parseFloat(data?.weeklyYield);
-      if (!Number.isFinite(wy)) return;
-      const pct = wy * 100;
-      const asOf = data?.updatedAt
-        ? data.updatedAt.slice(0, 10)
-        : new Date().toISOString().slice(0, 10);
-      out[slug] = {
-        yield7d: `${pct.toFixed(2)}%`,
-        asOf,
-        source: "Spiko (7d annualized yield)",
-      };
+      if (res.ok) {
+        const data = await res.json();
+        const wy = parseFloat(data?.weeklyYield);
+        if (Number.isFinite(wy)) {
+          entry.yield7d = `${(wy * 100).toFixed(2)}%`;
+          entry.asOf = data?.updatedAt ? data.updatedAt.slice(0, 10) : todayISO();
+          entry.source = "Spiko (7d annualized yield)";
+        }
+      }
     } catch (e) {
-      console.warn(`[rwa-yield-fetcher] Spiko ${symbol} failed: ${e.message}`);
+      console.warn(`[rwa-yield-fetcher] Spiko ${symbol} yield failed: ${e.message}`);
     }
+    // TVL: Stellar supply × NAV × FX
+    try {
+      const [totalsRes, supply] = await Promise.all([
+        fetch(`${SPIKO_API}/share-classes/${symbol}/totals`),
+        getTokenSupply(cfg.stellarContractId, cfg.decimals),
+      ]);
+      if (totalsRes.ok && Number.isFinite(supply)) {
+        const totals = await totalsRes.json();
+        const nav = parseFloat(totals?.netAssetValue?.amount?.value);
+        const fx = _spikoFxToUsd(cfg.fx);
+        if (Number.isFinite(nav) && Number.isFinite(fx)) {
+          const usd = supply * nav * fx;
+          entry.tvl = formatBigUSD(usd);
+          entry.supplyTokens = supply;
+          entry.tvlSource = cfg.fx === "USD"
+            ? "Spiko (Stellar supply × NAV)"
+            : `Spiko (Stellar supply × NAV × ${cfg.fx}/USD)`;
+          if (!entry.asOf) entry.asOf = todayISO();
+        }
+      }
+    } catch (e) {
+      console.warn(`[rwa-yield-fetcher] Spiko ${symbol} tvl failed: ${e.message}`);
+    }
+    if (Object.keys(entry).length > 0) out[cfg.slug] = entry;
   }));
   return out;
 }
 
-// ── Etherfuse ───────────────────────────────────────────────────────────────
-// Public REST API, no auth. Per-bond endpoint returns `current_basis_points`,
-// which is the displayed APY × 100 (so 321 bps = 3.21% APY).
+// ── Etherfuse (yield + tvl) ─────────────────────────────────────────────────
+// Public REST API, no auth. Per-bond endpoint returns `current_basis_points`
+// (bps of APY) and `bond_cost_in_usd`. The stablebonds list returns per-chain
+// `totalSupply` — we filter to the Stellar entry and multiply.
 
 const ETHERFUSE_API = "https://api.etherfuse.com";
 
@@ -169,34 +274,54 @@ const ETHERFUSE_SYMBOLS = {
 
 async function fetchEtherfuse() {
   const out = {};
+  // Grab the full bond list once (has per-chain supply). Then hit /cost/{sym}
+  // in parallel for APY + USD price per bond.
+  let stablebondsBySymbol = {};
+  try {
+    const res = await fetch(`${ETHERFUSE_API}/lookup/stablebonds`);
+    if (res.ok) {
+      const data = await res.json();
+      for (const b of data?.stablebonds || []) stablebondsBySymbol[b.symbol] = b;
+    }
+  } catch (e) {
+    console.warn(`[rwa-yield-fetcher] Etherfuse list-stablebonds failed: ${e.message}`);
+  }
+
   await Promise.all(Object.entries(ETHERFUSE_SYMBOLS).map(async ([symbol, slug]) => {
+    const entry = {};
     try {
       const res = await fetch(`${ETHERFUSE_API}/lookup/bonds/cost/${symbol}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const bps = Number(data?.current_basis_points);
-      if (!Number.isFinite(bps)) return;
-      const pct = bps / 100;
-      const asOf = data?.current_time
-        ? data.current_time.slice(0, 10)
-        : new Date().toISOString().slice(0, 10);
-      out[slug] = {
-        yield7d: `${pct.toFixed(2)}%`,
-        asOf,
-        source: "Etherfuse (current bond APY)",
-      };
+      if (Number.isFinite(bps)) {
+        entry.yield7d = `${(bps / 100).toFixed(2)}%`;
+        entry.source = "Etherfuse (current bond APY)";
+      }
+      entry.asOf = data?.current_time ? data.current_time.slice(0, 10) : todayISO();
+
+      const usdPerToken = parseFloat(data?.bond_cost_in_usd);
+      const bond = stablebondsBySymbol[symbol];
+      const stellarLeg = (bond?.blockchains || []).find(b => b.blockchain === "stellar");
+      const stellarSupply = parseFloat(stellarLeg?.totalSupply);
+      if (Number.isFinite(usdPerToken) && Number.isFinite(stellarSupply)) {
+        const usd = stellarSupply * usdPerToken;
+        entry.tvl = formatBigUSD(usd);
+        entry.supplyTokens = stellarSupply;
+        entry.tvlSource = "Etherfuse (Stellar supply × USD price)";
+      }
     } catch (e) {
       console.warn(`[rwa-yield-fetcher] Etherfuse ${symbol} failed: ${e.message}`);
     }
+    if (Object.keys(entry).length > 0) out[slug] = entry;
   }));
   return out;
 }
 
-// ── Ondo ────────────────────────────────────────────────────────────────────
-// Ondo's authenticated API (api.gm.ondo.finance) requires an API key we don't
-// have. The public marketing page ondo.finance/usdy embeds a JSON blob with
-// the live APY. Anchoring the regex on the unique product name keeps this
-// fragile-but-acceptable until Ondo opens a public yield endpoint.
+// ── Ondo (yield only) ───────────────────────────────────────────────────────
+// Ondo's authenticated API requires an API key we don't have. Parse the public
+// marketing page for APY. No supply endpoint — TVL for USDY comes from the
+// classic-asset Horizon path in server.js (USDY is a classic Stellar asset).
 
 const ONDO_USDY_URL = "https://ondo.finance/usdy";
 
@@ -207,12 +332,7 @@ async function fetchOndo() {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     let html = await res.text();
-    // Ondo's page embeds asset data as a JSON string inside another JSON
-    // payload, so quotes arrive double-escaped. Collapse `\"` → `"` once
-    // so the regex below works on either escape level.
     html = html.replace(/\\"/g, '"');
-    // Anchor on the unique product name so we don't capture an APY from some
-    // other asset block on the page.
     const m = html.match(/"name":"Ondo US Dollar Yield"[^}]{0,200}?"apy":\s*([\d.]+)/);
     if (!m) throw new Error("apy field not found in HTML");
     const pct = parseFloat(m[1]);
@@ -220,7 +340,7 @@ async function fetchOndo() {
     return {
       "usdy-gajmpx": {
         yield7d: `${pct.toFixed(2)}%`,
-        asOf: new Date().toISOString().slice(0, 10),
+        asOf: todayISO(),
         source: "Ondo USDY (live APY from ondo.finance)",
       },
     };
@@ -230,33 +350,80 @@ async function fetchOndo() {
   }
 }
 
-// ── Registry ────────────────────────────────────────────────────────────────
-// Each fetcher returns a slug-keyed object of fresh values, or {} on failure.
-// Add new issuers here. Slug coverage gaps fall back to curated rwa-yields.json.
+// ── Soroban RPC supply pass (tvl only) ──────────────────────────────────────
+// For Soroban-native tokens whose issuers don't expose a supply API, we query
+// total_supply directly and price the result via a per-token hint.
 
-const ISSUER_FETCHERS = [
-  { name: "centrifuge", fn: fetchCentrifuge },  // JAAA, deJAAA, JTRSY, deJTRSY
-  { name: "spiko",      fn: fetchSpiko },        // USTBL, EUTBL, UKTBL, SAFO
-  { name: "etherfuse",  fn: fetchEtherfuse },    // USTRY, CETES
-  { name: "ondo",       fn: fetchOndo },         // USDY
-  // Still manual (no public yield API found): BENJI (Franklin), MGUSD
-  // (MoneyGram — stable, no yield), USDM1 (M1X), YLDS (computed from
-  // SOFR in server.js), XAUM (non-yielding gold).
+const SOROBAN_TVL_TOKENS = [
+  {
+    slug: "usst-cbz4dc",     contractId: "CBZ4DCE7PYMUTOAKKUTRSUPT3FJFVOWCSKWUM5A72D6SAVMUJE5JN2PJ",
+    decimals: 18, priceLabel: "USD peg",  priceFn: () => 1.0,
+  },
+  {
+    slug: "xaum-cc2rbg",     contractId: "CC2RBGYNCFBCVENIDL5BFBWPH4OUZM2UA3OD2K2N54GLMWCC4KWPVAGO",
+    decimals: 9,  priceLabel: "PAXG spot", priceFn: () => _priceCache.goldUsdPerOz,
+  },
+  {
+    slug: "solvbtc-cbijbd",  contractId: "CBIJBDNZNF4X35BJ4FFZWCDBSCKOP5NB4PLG4SNENRMLAPYG4P5FM6VN",
+    decimals: 8,  priceLabel: "BTC spot",  priceFn: () => _priceCache.btcUsd,
+  },
+  {
+    slug: "xsolvbtc-caup7n", contractId: "CAUP7NFABXE5TJRL3FKTPMWRLC7IAXYDCTHQRFSCLR5TMGKHOOQO772J",
+    decimals: 8,  priceLabel: "BTC spot",  priceFn: () => _priceCache.btcUsd,
+  },
+  {
+    slug: "euraud-cb44w7",   contractId: "CB44W727WSLHPXJ47A6DHF5D34RKWSOZAMEDXO3CF5TEEEQ2ZX4V3VRI",
+    decimals: 6,  priceLabel: "EUR/USD",   priceFn: () => _priceCache.eurUsd,
+  },
 ];
 
-// ── Refresh loop ────────────────────────────────────────────────────────────
+async function fetchSorobanSupplies() {
+  const out = {};
+  await Promise.all(SOROBAN_TVL_TOKENS.map(async (t) => {
+    try {
+      const supply = await getTokenSupply(t.contractId, t.decimals);
+      if (!Number.isFinite(supply)) return;
+      const price = t.priceFn();
+      if (!Number.isFinite(price)) return;
+      const usd = supply * price;
+      out[t.slug] = {
+        tvl: formatBigUSD(usd),
+        supplyTokens: supply,
+        tvlSource: `Soroban total_supply × ${t.priceLabel}`,
+        asOf: todayISO(),
+      };
+    } catch (e) {
+      console.warn(`[rwa-yield-fetcher] Soroban ${t.slug} failed: ${e.message}`);
+    }
+  }));
+  return out;
+}
+
+// ── Refresh orchestration ───────────────────────────────────────────────────
+
+const REFRESHERS = [
+  { name: "centrifuge", fn: fetchCentrifuge },       // JAAA, deJAAA, JTRSY, deJTRSY (yield + tvl)
+  { name: "spiko",      fn: fetchSpiko },            // USTBL, EUTBL, UKTBL, SAFO (yield + tvl)
+  { name: "etherfuse",  fn: fetchEtherfuse },        // USTRY, CETES, TESOURO (yield + tvl)
+  { name: "ondo",       fn: fetchOndo },             // USDY (yield only)
+  { name: "soroban",    fn: fetchSorobanSupplies }, // USST, XAUM, SOLVBTC, XSOLVBTC, EURAU (tvl only)
+];
 
 async function refreshAll() {
+  await refreshPrices();
+
   const next = new Map();
   const summary = { ok: 0, failed: 0, byIssuer: {} };
 
-  await Promise.all(ISSUER_FETCHERS.map(async ({ name, fn }) => {
+  await Promise.all(REFRESHERS.map(async ({ name, fn }) => {
     try {
       const values = await fn();
       const count = Object.keys(values).length;
       summary.byIssuer[name] = { count, error: null };
       for (const [slug, value] of Object.entries(values)) {
-        next.set(slug, { ts: Date.now(), value });
+        // Merge: an earlier fetcher may have written yield7d; this one may add tvl (or vice versa).
+        const prev = next.get(slug)?.value || {};
+        next.set(slug, { ts: Date.now(), value: { ...prev, ...value } });
       }
       summary.ok += count;
     } catch (e) {
@@ -276,7 +443,7 @@ async function refreshAll() {
   cache = next;
   lastRefreshTs = Date.now();
   lastRefreshSummary = summary;
-  console.log(`[rwa-yield-fetcher] refreshed ${summary.ok} slug(s); failures: ${summary.failed}`);
+  console.log(`[rwa-yield-fetcher] refreshed ${summary.ok} slug(s) across ${REFRESHERS.length} sources; failures: ${summary.failed}`);
 }
 
 let _interval = null;
@@ -307,6 +474,7 @@ function getStatus() {
   return {
     lastRefreshAt: lastRefreshTs ? new Date(lastRefreshTs).toISOString() : null,
     cachedSlugs: cache.size,
+    prices: { ..._priceCache },
     summary: lastRefreshSummary,
   };
 }

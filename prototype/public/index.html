@@ -2717,6 +2717,7 @@
         marketCap: s.marketCap || a.marketCap || null,
         statsAsOf: s.asOf || null,
         statsSource: s.source || null,
+        tvlSource: s.tvlSource || null,
       };
     }
 
@@ -2837,7 +2838,7 @@
         ? `<div class="rwa-stat-value yield">${escapeHtml(a.yield7d)}</div>${renderAsOf(a.statsAsOf, a.statsSource)}`
         : `<div class="rwa-stat-value muted">—</div>`;
       const marketCapStatHtml = a.marketCap
-        ? `<div class="rwa-stat-value">${escapeHtml(a.marketCap)}</div>`
+        ? `<div class="rwa-stat-value">${escapeHtml(a.marketCap)}</div>${renderAsOf(a.statsAsOf, a.tvlSource || a.statsSource)}`
         : `<div class="rwa-stat-value muted">—</div>`;
 
       let html = `
@@ -2866,7 +2867,7 @@
               ${yieldStatHtml}
             </div>
             <div class="rwa-stat">
-              <div class="rwa-stat-label">Market Cap</div>
+              <div class="rwa-stat-label">Stellar TVL</div>
               ${marketCapStatHtml}
             </div>
             <div class="rwa-stat">
