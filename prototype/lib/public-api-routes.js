@@ -8,6 +8,7 @@
 const express = require("express");
 const profiles = require("./public-profiles");
 const historyDb = require("./history-db");
+const profileAuth = require("./profile-auth");
 
 // Escape user-controlled strings before injecting into server-rendered HTML.
 // The profile page renders displayName/bio/avatarEmoji directly into the DOM
@@ -82,6 +83,53 @@ function createRouter(fetchPortfolioFn) {
   });
 
   // ══════════════════════════════════════════════════════════════════════════
+  // AUTH — signature-challenge for profile ownership
+  // ══════════════════════════════════════════════════════════════════════════
+
+  // Client asks for a challenge, signs it with the wallet being claimed,
+  // and includes the { challengeToken, signature } pair in the mutation
+  // body below. See lib/profile-auth.js for full flow.
+  router.post("/api/v1/auth/challenge", (req, res) => {
+    try {
+      const { address, action, slug } = req.body || {};
+      const c = profileAuth.issueChallenge({ address, action, slug });
+      res.json(c);
+    } catch (e) { res.status(400).json({ error: e.message }); }
+  });
+
+  // Helper: given a request body containing { challengeToken, signature }
+  // and an expected (address, action, slug), verify the challenge or throw.
+  function requireSignedChallenge({ challengeToken, signature }, expected) {
+    if (!challengeToken || !signature) {
+      throw new Error("challengeToken and signature required");
+    }
+    profileAuth.verifyAndConsume({
+      token: challengeToken,
+      address: expected.address,
+      signatureBase64: signature,
+      expectedAction: expected.action,
+      expectedSlug: expected.slug,
+    });
+  }
+
+  // Helper: verify the caller controls at least one wallet on the profile,
+  // for actions that operate on the profile as a whole (patch / delete).
+  function requireProfileControl(slug, body, action) {
+    const profile = profiles.getProfile(slug);
+    if (!profile) { const err = new Error("Profile not found"); err.status = 404; throw err; }
+    const currentAddresses = new Set((profile.wallets || []).map(w => w.address));
+    if (currentAddresses.size === 0) {
+      throw new Error("Profile has no wallets; cannot verify control");
+    }
+    const { challengeToken, signature, address } = body || {};
+    if (!address || !currentAddresses.has(address)) {
+      throw new Error("address must be one of the profile's current wallets");
+    }
+    requireSignedChallenge({ challengeToken, signature }, { address, action, slug });
+    return profile;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
   // PROFILES API
   // ══════════════════════════════════════════════════════════════════════════
 
@@ -90,17 +138,31 @@ function createRouter(fetchPortfolioFn) {
     catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  // Create requires at least one wallet claim, each with its own signed
+  // challenge for action=create-profile bound to this slug.
   router.post("/api/v1/profiles", (req, res) => {
     try {
       const { slug, displayName, bio, avatarEmoji, wallets, showBalances, showDefi, showHistory } = req.body || {};
       if (!slug || !displayName) return res.status(400).json({ error: "slug and displayName are required" });
-      const profile = profiles.createProfile(slug, displayName, { bio, avatarEmoji, showBalances, showDefi, showHistory });
-      if (Array.isArray(wallets)) {
-        for (const w of wallets) {
-          if (w.address) profiles.addWalletToProfile(profile.slug, w.address, w.label || null);
-        }
+      if (!Array.isArray(wallets) || wallets.length === 0) {
+        return res.status(400).json({ error: "At least one signed wallet claim is required to create a profile" });
       }
-      res.json({ message: "Profile created!", url: `/p/${profile.slug}`, ...profile });
+
+      // Verify every wallet claim BEFORE writing anything. If any verification
+      // fails, no partial profile is created.
+      for (const w of wallets) {
+        if (!w || !w.address) return res.status(400).json({ error: "Each wallet must include an address" });
+        requireSignedChallenge(
+          { challengeToken: w.challengeToken, signature: w.signature },
+          { address: w.address, action: "create-profile", slug }
+        );
+      }
+
+      const profile = profiles.createProfile(slug, displayName, { bio, avatarEmoji, showBalances, showDefi, showHistory });
+      for (const w of wallets) {
+        profiles.addWalletToProfile(profile.slug, w.address, w.label || null);
+      }
+      res.json({ message: "Profile created!", url: `/p/${profile.slug}`, ...profiles.getProfile(profile.slug) });
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
 
@@ -116,31 +178,51 @@ function createRouter(fetchPortfolioFn) {
     res.json({ slug: req.params.slug, available: profiles.isSlugAvailable(req.params.slug) });
   });
 
+  // Patch requires signature from any wallet currently on the profile.
   router.patch("/api/v1/profiles/:slug", (req, res) => {
     try {
-      profiles.updateProfile(req.params.slug, req.body);
+      requireProfileControl(req.params.slug, req.body, "modify-profile");
+      // Strip the auth fields before passing to updateProfile so they can't
+      // accidentally become columns.
+      const { challengeToken, signature, address, ...updates } = req.body || {};
+      profiles.updateProfile(req.params.slug, updates);
       res.json(profiles.getProfile(req.params.slug));
-    } catch (e) { res.status(400).json({ error: e.message }); }
+    } catch (e) { res.status(e.status || 400).json({ error: e.message }); }
   });
 
   router.delete("/api/v1/profiles/:slug", (req, res) => {
-    try { profiles.deleteProfile(req.params.slug); res.json({ message: "Profile deleted" }); }
-    catch (e) { res.status(500).json({ error: e.message }); }
+    try {
+      requireProfileControl(req.params.slug, req.body, "delete-profile");
+      profiles.deleteProfile(req.params.slug);
+      res.json({ message: "Profile deleted" });
+    } catch (e) { res.status(e.status || 400).json({ error: e.message }); }
   });
 
+  // Adding a wallet requires signature from the wallet being ADDED (proves
+  // control of the new wallet) — not from an existing profile wallet.
   router.post("/api/v1/profiles/:slug/wallets", (req, res) => {
     try {
-      const { address, label } = req.body || {};
+      const { address, label, challengeToken, signature } = req.body || {};
       if (!address) return res.status(400).json({ error: "address is required" });
+      requireSignedChallenge(
+        { challengeToken, signature },
+        { address, action: "add-wallet", slug: req.params.slug }
+      );
       profiles.addWalletToProfile(req.params.slug, address, label);
       res.json({ message: "Wallet added" });
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
 
+  // Removing a wallet requires signature from the wallet being REMOVED
+  // (only its controller can pull it off a profile).
   router.delete("/api/v1/profiles/:slug/wallets", (req, res) => {
     try {
-      const { address } = req.body || {};
+      const { address, challengeToken, signature } = req.body || {};
       if (!address) return res.status(400).json({ error: "address is required" });
+      requireSignedChallenge(
+        { challengeToken, signature },
+        { address, action: "remove-wallet", slug: req.params.slug }
+      );
       profiles.removeWalletFromProfile(req.params.slug, address);
       res.json({ message: "Wallet removed" });
     } catch (e) { res.status(400).json({ error: e.message }); }
