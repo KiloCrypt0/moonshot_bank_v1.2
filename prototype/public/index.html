@@ -2304,6 +2304,104 @@
     }
     .rwa-stat-asof.stale { color: var(--orange, #f59e0b); }
 
+    /* Create Profile page */
+    .cp-page { max-width: 640px; margin: 24px auto; padding: 0 20px; }
+    .cp-title { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
+    .cp-subtitle { color: var(--text-muted); font-size: 14px; margin-bottom: 24px; line-height: 1.5; }
+    .cp-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .cp-field { margin-bottom: 16px; }
+    .cp-field:last-child { margin-bottom: 0; }
+    .cp-label {
+      display: block;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+    .cp-input, .cp-textarea {
+      width: 100%;
+      background: var(--bg-primary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: var(--text-primary);
+      font-size: 14px;
+      font-family: inherit;
+    }
+    .cp-input:focus, .cp-textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .cp-textarea { min-height: 72px; resize: vertical; }
+    .cp-input.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+    .cp-hint { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+    .cp-hint.ok { color: var(--green); }
+    .cp-hint.err { color: var(--red); }
+    .cp-checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 0;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .cp-checkbox-row input { cursor: pointer; }
+    .cp-wallet-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--bg-primary);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 6px 14px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 13px;
+    }
+    .cp-wallet-pill.empty { color: var(--text-muted); font-style: italic; font-family: inherit; }
+    .cp-status {
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      margin-top: 12px;
+      display: none;
+    }
+    .cp-status.visible { display: block; }
+    .cp-status.info { background: rgba(99,102,241,0.15); color: var(--accent); }
+    .cp-status.ok { background: rgba(34,197,94,0.15); color: var(--green); }
+    .cp-status.err { background: rgba(239,68,68,0.15); color: var(--red); }
+    .cp-actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 20px;
+    }
+    .cp-actions .btn { flex: 1; }
+    .cp-actions .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .cp-emoji-picker {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-top: 6px;
+    }
+    .cp-emoji-btn {
+      background: var(--bg-primary);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 10px;
+      cursor: pointer;
+      font-size: 20px;
+      transition: background 0.12s;
+    }
+    .cp-emoji-btn:hover { background: var(--bg-hover); }
+    .cp-emoji-btn.selected { border-color: var(--accent); background: rgba(99,102,241,0.1); }
+
     .trust-attrs {
       margin-top: 28px;
       border: 1px solid var(--border);
@@ -2582,6 +2680,7 @@
   <nav class="page-nav" id="pageNav">
     <button class="page-nav-tab active" data-page="portfolio" onclick="switchPage('portfolio')">Portfolio</button>
     <button class="page-nav-tab" data-page="rwas" onclick="switchPage('rwas')">RWAs</button>
+    <button class="page-nav-tab" data-page="profile" onclick="switchPage('profile')">Profile</button>
   </nav>
 
   <div class="main" id="app">
@@ -2687,7 +2786,7 @@
 
     // ── Top-level page nav (Portfolio / RWAs) ─────────────────
     async function switchPage(page) {
-      if (page !== "portfolio" && page !== "rwas") page = "portfolio";
+      if (!["portfolio", "rwas", "profile"].includes(page)) page = "portfolio";
       currentPage = page;
 
       // Update tab styles
@@ -2696,13 +2795,15 @@
       });
 
       // Update URL hash without scrolling
-      const newHash = page === "rwas" ? "#/rwas" : "";
+      const newHash = page === "rwas" ? "#/rwas" : page === "profile" ? "#/profile" : "";
       if (location.hash !== newHash) {
         history.replaceState(null, "", location.pathname + location.search + newHash);
       }
 
       if (page === "rwas") {
         await renderRwasPage();
+      } else if (page === "profile") {
+        await renderCreateProfilePage();
       } else {
         // Restore the welcome screen / portfolio view
         const app = document.getElementById("app");
@@ -2818,6 +2919,245 @@
       const title = statsSource ? ` title="${escapeHtml(statsSource)}"` : "";
       return `<div class="rwa-stat-asof${stale ? " stale" : ""}"${title}>as of ${escapeHtml(statsAsOf)}${stale ? " (stale)" : ""}</div>`;
     }
+
+    // ── Create Profile ─────────────────────────────────────────────────────
+    // Builds a public /p/{slug} profile linking a display name + optional bio
+    // to one or more wallets the caller controls. Wallet control is proven by
+    // signing a challenge issued by the server for (address, action, slug).
+    // See lib/profile-auth.js on the server for the verification path.
+
+    const AVATAR_OPTIONS = ["🚀", "⭐", "🌟", "💫", "🌙", "🔷", "💎", "🏦", "🎯", "🦄", "🐋", "🦅"];
+    let cpState = {
+      slug: "",
+      slugStatus: null,   // null | "checking" | "available" | "taken" | "invalid"
+      slugTimer: null,
+      displayName: "",
+      bio: "",
+      avatarEmoji: "🚀",
+      showBalances: true,
+      showDefi: true,
+      showHistory: false,
+      wallet: null,       // { address } — populated when user connects
+      submitting: false,
+    };
+
+    async function renderCreateProfilePage() {
+      const app = document.getElementById("app");
+      // Preselect the currently-connected wallet from localStorage, if any.
+      try {
+        const saved = localStorage.getItem(CONNECTED_ADDR_KEY);
+        if (saved && /^G[A-Z2-7]{55}$/.test(saved) && !cpState.wallet) {
+          cpState.wallet = { address: saved };
+        }
+      } catch (e) {}
+
+      app.innerHTML = `
+        <div class="cp-page">
+          <div class="cp-title">Create Public Profile</div>
+          <div class="cp-subtitle">
+            Publish a shareable page at <span style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace">stellarscope.xyz/p/&lt;slug&gt;</span>
+            that shows your Stellar portfolio. You'll sign a message with your wallet to prove ownership — no funds move, no gas fee.
+          </div>
+
+          <div class="cp-card">
+            <div class="cp-field">
+              <label class="cp-label" for="cpSlug">URL slug</label>
+              <input class="cp-input mono" id="cpSlug" placeholder="e.g. keb" maxlength="30" value="${escapeHtml(cpState.slug)}" />
+              <div class="cp-hint" id="cpSlugHint">2-30 characters, lowercase letters, numbers, hyphens.</div>
+            </div>
+            <div class="cp-field">
+              <label class="cp-label" for="cpDisplay">Display name</label>
+              <input class="cp-input" id="cpDisplay" placeholder="What should we call you?" maxlength="60" value="${escapeHtml(cpState.displayName)}" />
+            </div>
+            <div class="cp-field">
+              <label class="cp-label" for="cpBio">Bio (optional)</label>
+              <textarea class="cp-textarea" id="cpBio" placeholder="A short blurb — max 240 chars" maxlength="240">${escapeHtml(cpState.bio)}</textarea>
+            </div>
+            <div class="cp-field">
+              <label class="cp-label">Avatar</label>
+              <div class="cp-emoji-picker" id="cpEmojiPicker">
+                ${AVATAR_OPTIONS.map(e =>
+                  `<button type="button" class="cp-emoji-btn${e === cpState.avatarEmoji ? " selected" : ""}" data-emoji="${e}">${e}</button>`
+                ).join("")}
+              </div>
+            </div>
+          </div>
+
+          <div class="cp-card">
+            <div class="cp-label" style="margin-bottom:12px">What's visible on your public page</div>
+            <label class="cp-checkbox-row">
+              <input type="checkbox" id="cpShowBalances" ${cpState.showBalances ? "checked" : ""} />
+              Token balances and total portfolio value
+            </label>
+            <label class="cp-checkbox-row">
+              <input type="checkbox" id="cpShowDefi" ${cpState.showDefi ? "checked" : ""} />
+              DeFi positions (lending, LPs, vaults)
+            </label>
+            <label class="cp-checkbox-row">
+              <input type="checkbox" id="cpShowHistory" ${cpState.showHistory ? "checked" : ""} />
+              Portfolio value over time
+            </label>
+          </div>
+
+          <div class="cp-card">
+            <div class="cp-label" style="margin-bottom:12px">Wallet</div>
+            <div id="cpWalletSection">
+              ${cpState.wallet
+                ? `<div class="cp-wallet-pill">${cpState.wallet.address.slice(0, 8)}…${cpState.wallet.address.slice(-6)}</div>
+                   <div class="cp-hint" style="margin-top:8px">This wallet will be linked to the profile. You'll sign a challenge with it to prove control.</div>`
+                : `<div class="cp-wallet-pill empty">No wallet connected</div>
+                   <div class="cp-hint" style="margin-top:8px">Connect a wallet to continue — the "Connect Wallet" button in the header opens a wallet picker.</div>`}
+            </div>
+          </div>
+
+          <div class="cp-status" id="cpStatus"></div>
+
+          <div class="cp-actions">
+            <button class="btn btn-secondary" onclick="switchPage('portfolio')">Cancel</button>
+            <button class="btn" id="cpSubmit" onclick="submitCreateProfile()" ${(!cpState.wallet || cpState.submitting) ? "disabled" : ""}>
+              ${cpState.submitting ? "Signing…" : "Sign & Create Profile"}
+            </button>
+          </div>
+        </div>
+      `;
+
+      // Wire input handlers
+      document.getElementById("cpSlug").addEventListener("input", cpOnSlugInput);
+      document.getElementById("cpDisplay").addEventListener("input", (e) => { cpState.displayName = e.target.value; });
+      document.getElementById("cpBio").addEventListener("input", (e) => { cpState.bio = e.target.value; });
+      document.getElementById("cpShowBalances").addEventListener("change", (e) => { cpState.showBalances = e.target.checked; });
+      document.getElementById("cpShowDefi").addEventListener("change", (e) => { cpState.showDefi = e.target.checked; });
+      document.getElementById("cpShowHistory").addEventListener("change", (e) => { cpState.showHistory = e.target.checked; });
+      document.querySelectorAll(".cp-emoji-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          cpState.avatarEmoji = btn.getAttribute("data-emoji");
+          document.querySelectorAll(".cp-emoji-btn").forEach(b => b.classList.toggle("selected", b === btn));
+        });
+      });
+
+      // Immediate slug check if user is returning to the form with content
+      if (cpState.slug) cpOnSlugInput({ target: { value: cpState.slug } });
+    }
+
+    function cpOnSlugInput(e) {
+      const raw = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "");
+      cpState.slug = raw;
+      if (raw !== e.target.value) e.target.value = raw;
+
+      const hint = document.getElementById("cpSlugHint");
+      if (cpState.slugTimer) clearTimeout(cpState.slugTimer);
+
+      if (!raw) { hint.textContent = "2-30 characters, lowercase letters, numbers, hyphens."; hint.className = "cp-hint"; return; }
+      if (raw.length < 2) { hint.textContent = "Too short — at least 2 characters."; hint.className = "cp-hint err"; return; }
+
+      hint.textContent = "Checking availability…";
+      hint.className = "cp-hint";
+      cpState.slugTimer = setTimeout(async () => {
+        try {
+          const r = await fetch(`${API_BASE}/api/v1/profiles/check/${encodeURIComponent(raw)}`);
+          const j = await r.json();
+          if (j.available) { hint.textContent = "✓ Available"; hint.className = "cp-hint ok"; }
+          else { hint.textContent = "Taken — pick a different slug."; hint.className = "cp-hint err"; }
+        } catch (err) {
+          hint.textContent = "Couldn't check availability — try again.";
+          hint.className = "cp-hint err";
+        }
+      }, 350);
+    }
+
+    function cpSetStatus(msg, kind) {
+      const el = document.getElementById("cpStatus");
+      if (!el) return;
+      el.textContent = msg;
+      el.className = `cp-status visible ${kind}`;
+    }
+
+    window.submitCreateProfile = async function () {
+      if (cpState.submitting) return;
+      if (!cpState.wallet) {
+        cpSetStatus("Connect a wallet first (use the Connect Wallet button in the header).", "err");
+        return;
+      }
+      if (!cpState.slug || cpState.slug.length < 2) {
+        cpSetStatus("Pick a slug for your profile URL.", "err");
+        return;
+      }
+      if (!cpState.displayName.trim()) {
+        cpSetStatus("Enter a display name.", "err");
+        return;
+      }
+
+      cpState.submitting = true;
+      const btn = document.getElementById("cpSubmit");
+      btn.disabled = true;
+      btn.textContent = "Requesting challenge…";
+
+      try {
+        // 1. Ask server for a challenge scoped to (address, create-profile, slug).
+        const chRes = await fetch(`${API_BASE}/api/v1/auth/challenge`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            address: cpState.wallet.address,
+            action: "create-profile",
+            slug: cpState.slug,
+          }),
+        });
+        const ch = await chRes.json();
+        if (!chRes.ok) throw new Error(ch.error || "Failed to request challenge");
+
+        // 2. Ask the wallet to sign the challenge message.
+        btn.textContent = "Signing (check your wallet)…";
+        cpSetStatus("Approve the signature request in your wallet.", "info");
+        const signResult = await StellarWalletsKit.signMessage(ch.message);
+        // Stellar Wallets Kit returns { signedMessage } — base64 ed25519 signature over the message bytes.
+        const signature = signResult?.signedMessage || signResult?.signature || signResult;
+        if (!signature || typeof signature !== "string") {
+          throw new Error("Wallet returned an unexpected signature format");
+        }
+
+        // 3. Submit the signed profile.
+        btn.textContent = "Publishing…";
+        cpSetStatus("Publishing profile…", "info");
+        const createRes = await fetch(`${API_BASE}/api/v1/profiles`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            slug: cpState.slug,
+            displayName: cpState.displayName.trim(),
+            bio: cpState.bio.trim() || null,
+            avatarEmoji: cpState.avatarEmoji,
+            showBalances: cpState.showBalances,
+            showDefi: cpState.showDefi,
+            showHistory: cpState.showHistory,
+            wallets: [{
+              address: cpState.wallet.address,
+              label: "Freighter",
+              challengeToken: ch.token,
+              signature,
+            }],
+          }),
+        });
+        const created = await createRes.json();
+        if (!createRes.ok) throw new Error(created.error || "Server rejected the profile");
+
+        cpSetStatus(`✓ Profile created! Redirecting to /p/${cpState.slug}…`, "ok");
+        setTimeout(() => { window.location.href = `/p/${encodeURIComponent(cpState.slug)}`; }, 900);
+      } catch (e) {
+        console.error("Create profile failed:", e);
+        // Rejected sign requests from wallets show up as various error shapes;
+        // catch the common ones and give the user a friendlier message.
+        const msg = String(e?.message || e);
+        if (/reject|denied|cancel|closed/i.test(msg)) {
+          cpSetStatus("Signature request was cancelled — try again when you're ready.", "err");
+        } else {
+          cpSetStatus("Couldn't create profile: " + msg, "err");
+        }
+        cpState.submitting = false;
+        btn.disabled = false;
+        btn.textContent = "Sign & Create Profile";
+      }
+    };
 
     async function renderRwasPage() {
       const app = document.getElementById("app");
@@ -3022,6 +3362,7 @@
     function pageFromHash() {
       const h = location.hash || "";
       if (h === "#/rwas") return { page: "rwas" };
+      if (h === "#/profile") return { page: "profile" };
       const m = h.match(/^#\/rwa\/(.+)$/);
       if (m) return { page: "rwa-detail", slug: m[1] };
       return { page: "portfolio" };
