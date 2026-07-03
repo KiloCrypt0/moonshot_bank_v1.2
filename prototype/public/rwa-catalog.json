@@ -11,7 +11,7 @@
     "yield7d": "Average 7-day yield as a string (e.g., '5.21%'). null hides the value.",
     "marketCap": "Market cap as a string (e.g., '$700M'). null hides the value.",
     "venues": "Array of {name, url} for trading/liquidity venues. Stellar Expert is auto-added.",
-    "trust": "Optional trust-attribute block shown as a fact sheet on the detail page. Fields: regulator, reserves, attestation, custody, redemption, transfers, audit, stellarSince. Use null when a field truly does not apply (e.g., 'audit' for classic non-Soroban assets); use empty string when the fact exists but hasn't been researched yet — the UI distinguishes these. Values are one-line facts from public issuer disclosures, not opinions."
+    "trust": "Trust-attribute fact sheet shown on the detail page. Fields split into two groups: (a) core basics — regulator, reserves, attestation, custody, redemption, transfers, audit, stellarSince; (b) extended diligence dimensions — jurisdiction, legalClaim, oracle, contractPermissions, counterpartyRisk, secondaryMarket. Use null when a field truly does not apply; empty string when the fact exists but hasn't been researched yet — the UI distinguishes these. Values are one-line facts from public issuer disclosures, not opinions. Extended dimensions are the schema layer that would feed a paid B2B diligence product (see project memory)."
   },
   "categories": [
     {
@@ -655,7 +655,13 @@
             "redemption": "Instant 1:1 via Circle Mint (institutional accounts)",
             "transfers": "Open; issuer can freeze via Stellar admin flags",
             "audit": null,
-            "stellarSince": "2018"
+            "stellarSince": "2018",
+            "jurisdiction": "United States (Circle Internet Financial, headquartered NY / MA); EU issuance via Circle Mint Europe SAS (France)",
+            "legalClaim": "Holder's redemption right against Circle backed by segregated reserves; no direct trustee/UCC filing (typical MSB-issued e-money model)",
+            "oracle": "Off-chain: monthly Deloitte reserve attestations. On-chain: Chainlink Proof-of-Reserves (Ethereum feed; no Stellar-native PoR yet)",
+            "contractPermissions": "Classic Stellar asset — Circle retains standard issuer admin flags (freeze, clawback, revoke authorization); no Soroban contract upgrade surface",
+            "counterpartyRisk": "Circle Internet Financial solvency + custodian solvency (BNY Mellon, State Street) + Stellar network liveness. Reserve segregation limits Circle-insolvency exposure.",
+            "secondaryMarket": "Deep — >$100B USDC circulating supply across all chains; on Stellar specifically, primary venues are Soroswap, Aquarius, StellarX, and SDEX pairs with XLM"
           },
           "venues": [
             {
@@ -753,7 +759,13 @@
             "redemption": "Via STBL dApp; secondary DEX liquidity limited (recent deployment)",
             "transfers": "Open (SEP-41 token)",
             "audit": "STBL has a HackenProof bug-bounty program; Stellar contract validation status is 'unverified' on Stellar Expert",
-            "stellarSince": "2026-06"
+            "stellarSince": "2026-06",
+            "jurisdiction": "Not publicly disclosed — no clear operating jurisdiction identified in STBL's public materials",
+            "legalClaim": "Redemption right against STBL protocol contract collateral; no traditional legal wrapper (no trustee, no UCC filing, no MSB license). Purely code-mediated.",
+            "oracle": "Underlying RWA collateral prices via STBL's oracle set (specific providers not publicly documented); collateral verifiable on-chain",
+            "contractPermissions": "Soroban contract flagged 'unverified' on Stellar Expert; upgrade authority and admin roles not publicly documented (verify contract source before relying)",
+            "counterpartyRisk": "Stack: STBL protocol contract risk + underlying RWA issuer solvency + collateral price volatility + oracle liveness. No fiat-issuer backstop.",
+            "secondaryMarket": "Thin — new deployment (June 2026), ~113 Stellar trustlines, minimal DEX activity to date. Redemption primarily via STBL dApp."
           },
           "venues": [
             {

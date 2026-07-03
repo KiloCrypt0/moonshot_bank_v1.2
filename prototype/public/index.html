@@ -2429,6 +2429,17 @@
       font-weight: 600;
       border-bottom: 1px solid var(--border);
     }
+    .trust-attrs-subheader {
+      background: var(--bg-secondary);
+      padding: 8px 16px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      font-weight: 600;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
     .trust-attr {
       display: grid;
       grid-template-columns: 150px 1fr;
@@ -2885,7 +2896,8 @@
     // in rwa-catalog.json under each asset's `trust` block. Values follow a
     // three-state convention: undefined/null = N/A (—), empty string = not
     // yet researched (italicized), otherwise a plain fact.
-    const TRUST_FIELDS = [
+    // Core basics — the always-shown fields.
+    const TRUST_FIELDS_BASIC = [
       ["regulator", "Regulator"],
       ["reserves", "Reserves"],
       ["attestation", "Attestation"],
@@ -2895,23 +2907,43 @@
       ["audit", "Audit"],
       ["stellarSince", "Stellar Since"],
     ];
+    // Extended diligence dimensions — same schema shape, deeper questions.
+    // These are the fields that would feed a paid B2B RWA-diligence product
+    // if we ever fork one out. Only rendered when the asset has at least
+    // one populated extended field, so unresearched assets don't show an
+    // empty section.
+    const TRUST_FIELDS_EXTENDED = [
+      ["jurisdiction", "Jurisdiction"],
+      ["legalClaim", "Legal Claim"],
+      ["oracle", "Oracle / Pricing"],
+      ["contractPermissions", "Contract Permissions"],
+      ["counterpartyRisk", "Counterparty Risk"],
+      ["secondaryMarket", "Secondary Market"],
+    ];
+    function renderTrustRow([key, label], trust) {
+      const raw = trust[key];
+      let cls = "", value = "";
+      if (raw === null || raw === undefined) { cls = "na"; value = "—"; }
+      else if (raw === "") { cls = "unresearched"; value = "Not yet researched"; }
+      else { value = escapeHtml(String(raw)); }
+      return `<div class="trust-attr">
+        <div class="trust-attr-label">${label}</div>
+        <div class="trust-attr-value ${cls}">${value}</div>
+      </div>`;
+    }
     function renderTrustAttrs(trust) {
       if (!trust || typeof trust !== "object") return "";
-      const rows = TRUST_FIELDS.map(([key, label]) => {
-        const raw = trust[key];
-        let cls = "", value = "";
-        if (raw === null || raw === undefined) { cls = "na"; value = "—"; }
-        else if (raw === "") { cls = "unresearched"; value = "Not yet researched"; }
-        else { value = escapeHtml(String(raw)); }
-        return `<div class="trust-attr">
-          <div class="trust-attr-label">${label}</div>
-          <div class="trust-attr-value ${cls}">${value}</div>
-        </div>`;
-      }).join("");
+      const basicRows = TRUST_FIELDS_BASIC.map(f => renderTrustRow(f, trust)).join("");
+      const hasExtended = TRUST_FIELDS_EXTENDED.some(([k]) => trust[k] !== undefined);
+      const extendedSection = hasExtended
+        ? `<div class="trust-attrs-subheader">Extended Diligence</div>
+           ${TRUST_FIELDS_EXTENDED.map(f => renderTrustRow(f, trust)).join("")}`
+        : "";
       return `
         <div class="trust-attrs">
           <div class="trust-attrs-header">Trust Attributes</div>
-          ${rows}
+          ${basicRows}
+          ${extendedSection}
           <div class="trust-footer">Facts compiled from public issuer disclosures — not investment advice. Verify with the issuer before investing.</div>
         </div>
       `;
