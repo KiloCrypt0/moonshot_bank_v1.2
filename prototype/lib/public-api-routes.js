@@ -174,6 +174,19 @@ function createRouter(fetchPortfolioFn) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  // Lookup any profiles that include this wallet address. Used by the SPA
+  // Profile tab to switch from Create → Manage when the connected wallet
+  // already owns a profile. Public read; a Stellar G-address isn't sensitive.
+  router.get("/api/v1/profiles/by-wallet/:address", (req, res) => {
+    try {
+      const { address } = req.params;
+      if (!/^G[A-Z2-7]{55}$/.test(address)) {
+        return res.status(400).json({ error: "Not a valid Stellar address" });
+      }
+      res.json({ address, profiles: profiles.listProfilesByWallet(address) });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   router.get("/api/v1/profiles/check/:slug", (req, res) => {
     res.json({ slug: req.params.slug, available: profiles.isSlugAvailable(req.params.slug) });
   });

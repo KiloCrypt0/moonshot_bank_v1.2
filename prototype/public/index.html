@@ -2961,6 +2961,20 @@
         }
       } catch (e) {}
 
+      // If the connected wallet already owns a profile, jump straight to the
+      // manage view instead of showing the create form. Users rarely have
+      // more than one profile per wallet in practice — pick the first.
+      if (cpState.wallet) {
+        app.innerHTML = `<div class="cp-page"><div class="cp-subtitle">Loading your profile…</div></div>`;
+        try {
+          const r = await fetch(`${API_BASE}/api/v1/profiles/by-wallet/${encodeURIComponent(cpState.wallet.address)}`);
+          if (r.ok) {
+            const { profiles: mine } = await r.json();
+            if (mine && mine.length > 0) return renderProfileManageView(mine[0]);
+          }
+        } catch (e) { /* fall through to create view */ }
+      }
+
       app.innerHTML = `
         <div class="cp-page">
           <div class="cp-title">Create Public Profile</div>
@@ -3084,6 +3098,227 @@
       el.textContent = msg;
       el.className = `cp-status visible ${kind}`;
     }
+
+    // ── Manage existing profile ─────────────────────────────────────────
+    // Prefill the editable fields from the current profile record and swap
+    // the "Sign & Create" primary action for "Save Changes" + "Delete
+    // Profile". Slug is treated as read-only — changing it would break
+    // existing links, and the API doesn't support it anyway.
+
+    let mpState = null;   // Set by renderProfileManageView; mirrors the current profile
+
+    function renderProfileManageView(profile) {
+      const app = document.getElementById("app");
+      mpState = {
+        slug: profile.slug,
+        displayName: profile.displayName || "",
+        bio: profile.bio || "",
+        avatarEmoji: profile.avatarEmoji || "🚀",
+        showBalances: !!profile.showBalances,
+        showDefi: !!profile.showDefi,
+        showHistory: !!profile.showHistory,
+        wallets: profile.wallets || [],
+        signingAddress: cpState.wallet?.address || (profile.wallets?.[0]?.address ?? null),
+        saving: false,
+        deleteConfirmText: "",
+      };
+
+      const walletList = mpState.wallets.map(w => `
+        <div class="cp-wallet-pill" style="margin:4px 4px 0 0" title="${escapeHtml(w.address)}">
+          ${w.label ? escapeHtml(w.label) + " · " : ""}${w.address.slice(0, 8)}…${w.address.slice(-6)}
+        </div>
+      `).join("") || `<div class="cp-wallet-pill empty">No wallets on this profile</div>`;
+
+      app.innerHTML = `
+        <div class="cp-page">
+          <div class="cp-title">Manage Profile</div>
+          <div class="cp-subtitle">
+            Editing <a href="/p/${encodeURIComponent(mpState.slug)}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">/p/${escapeHtml(mpState.slug)} ↗</a>. Changes require a signature from one of the wallets on this profile.
+          </div>
+
+          <div class="cp-card">
+            <div class="cp-field">
+              <label class="cp-label">URL slug</label>
+              <div class="cp-wallet-pill" style="background:var(--bg-primary)">${escapeHtml(mpState.slug)}</div>
+              <div class="cp-hint">Slug can't be changed after creation — it would break existing links.</div>
+            </div>
+            <div class="cp-field">
+              <label class="cp-label" for="mpDisplay">Display name</label>
+              <input class="cp-input" id="mpDisplay" maxlength="60" value="${escapeHtml(mpState.displayName)}" />
+            </div>
+            <div class="cp-field">
+              <label class="cp-label" for="mpBio">Bio</label>
+              <textarea class="cp-textarea" id="mpBio" maxlength="240">${escapeHtml(mpState.bio)}</textarea>
+            </div>
+            <div class="cp-field">
+              <label class="cp-label">Avatar</label>
+              <div class="cp-emoji-picker" id="mpEmojiPicker">
+                ${AVATAR_OPTIONS.map(e =>
+                  `<button type="button" class="cp-emoji-btn${e === mpState.avatarEmoji ? " selected" : ""}" data-emoji="${e}">${e}</button>`
+                ).join("")}
+              </div>
+            </div>
+          </div>
+
+          <div class="cp-card">
+            <div class="cp-label" style="margin-bottom:12px">What's visible on your public page</div>
+            <label class="cp-checkbox-row">
+              <input type="checkbox" id="mpShowBalances" ${mpState.showBalances ? "checked" : ""} />
+              Token balances and total portfolio value
+            </label>
+            <label class="cp-checkbox-row">
+              <input type="checkbox" id="mpShowDefi" ${mpState.showDefi ? "checked" : ""} />
+              DeFi positions (lending, LPs, vaults)
+            </label>
+            <label class="cp-checkbox-row">
+              <input type="checkbox" id="mpShowHistory" ${mpState.showHistory ? "checked" : ""} />
+              Portfolio value over time
+            </label>
+          </div>
+
+          <div class="cp-card">
+            <div class="cp-label" style="margin-bottom:12px">Wallets on this profile</div>
+            <div>${walletList}</div>
+            <div class="cp-hint" style="margin-top:8px">
+              Adding or removing wallets isn't wired up in the UI yet — each requires a signature from that specific wallet, which means connecting them one at a time. Reach out to us if you need this soon.
+            </div>
+          </div>
+
+          <div class="cp-status" id="mpStatus"></div>
+
+          <div class="cp-actions">
+            <button class="btn btn-secondary" onclick="switchPage('portfolio')">Back to Portfolio</button>
+            <button class="btn" id="mpSave" onclick="saveProfileChanges()">Save Changes</button>
+          </div>
+
+          <div class="cp-card" style="border-color:var(--red); margin-top:32px">
+            <div class="cp-label" style="color:var(--red); margin-bottom:8px">Danger Zone</div>
+            <div style="font-size:13px; color:var(--text-muted); line-height:1.5; margin-bottom:12px">
+              Delete this profile permanently. The URL <span style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace">/p/${escapeHtml(mpState.slug)}</span> will 404 and the slug becomes available for anyone to claim.
+            </div>
+            <div class="cp-field">
+              <label class="cp-label" for="mpDeleteConfirm">Type <span style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace">${escapeHtml(mpState.slug)}</span> to confirm</label>
+              <input class="cp-input mono" id="mpDeleteConfirm" placeholder="${escapeHtml(mpState.slug)}" />
+            </div>
+            <button class="btn" id="mpDelete" onclick="deleteMyProfile()" style="background:var(--red); color:white; width:100%" disabled>Delete Profile</button>
+          </div>
+        </div>
+      `;
+
+      // Wire input handlers
+      document.getElementById("mpDisplay").addEventListener("input", (e) => { mpState.displayName = e.target.value; });
+      document.getElementById("mpBio").addEventListener("input", (e) => { mpState.bio = e.target.value; });
+      document.getElementById("mpShowBalances").addEventListener("change", (e) => { mpState.showBalances = e.target.checked; });
+      document.getElementById("mpShowDefi").addEventListener("change", (e) => { mpState.showDefi = e.target.checked; });
+      document.getElementById("mpShowHistory").addEventListener("change", (e) => { mpState.showHistory = e.target.checked; });
+      document.querySelectorAll("#mpEmojiPicker .cp-emoji-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          mpState.avatarEmoji = btn.getAttribute("data-emoji");
+          document.querySelectorAll("#mpEmojiPicker .cp-emoji-btn").forEach(b => b.classList.toggle("selected", b === btn));
+        });
+      });
+      document.getElementById("mpDeleteConfirm").addEventListener("input", (e) => {
+        mpState.deleteConfirmText = e.target.value;
+        document.getElementById("mpDelete").disabled = e.target.value !== mpState.slug;
+      });
+    }
+
+    function mpSetStatus(msg, kind) {
+      const el = document.getElementById("mpStatus");
+      if (!el) return;
+      el.textContent = msg;
+      el.className = `cp-status visible ${kind}`;
+    }
+
+    // Ask the wallet to sign a challenge for (action, this profile) and hand
+    // the signed pair back. Throws if the user cancels or the wallet returns
+    // an unexpected shape.
+    async function requestSignedChallenge(action) {
+      if (!mpState.signingAddress) throw new Error("No wallet available to sign — connect a wallet on the profile");
+      const chRes = await fetch(`${API_BASE}/api/v1/auth/challenge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address: mpState.signingAddress, action, slug: mpState.slug }),
+      });
+      const ch = await chRes.json();
+      if (!chRes.ok) throw new Error(ch.error || "Failed to request challenge");
+      const sign = await StellarWalletsKit.signMessage(ch.message);
+      const signature = sign?.signedMessage || sign?.signature || sign;
+      if (!signature || typeof signature !== "string") throw new Error("Wallet returned an unexpected signature format");
+      return { challengeToken: ch.token, signature, address: mpState.signingAddress };
+    }
+
+    window.saveProfileChanges = async function () {
+      if (!mpState || mpState.saving) return;
+      const btn = document.getElementById("mpSave");
+      mpState.saving = true;
+      btn.disabled = true;
+      btn.textContent = "Signing…";
+      try {
+        mpSetStatus("Approve the signature request in your wallet.", "info");
+        const auth = await requestSignedChallenge("modify-profile");
+        btn.textContent = "Saving…";
+        mpSetStatus("Saving changes…", "info");
+        const r = await fetch(`${API_BASE}/api/v1/profiles/${encodeURIComponent(mpState.slug)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            displayName: mpState.displayName.trim(),
+            bio: mpState.bio.trim() || null,
+            avatarEmoji: mpState.avatarEmoji,
+            showBalances: mpState.showBalances,
+            showDefi: mpState.showDefi,
+            showHistory: mpState.showHistory,
+            ...auth,
+          }),
+        });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || "Server rejected the update");
+        mpSetStatus("✓ Saved.", "ok");
+      } catch (e) {
+        const msg = String(e?.message || e);
+        if (/reject|denied|cancel|closed/i.test(msg)) {
+          mpSetStatus("Signature request was cancelled.", "err");
+        } else {
+          mpSetStatus("Save failed: " + msg, "err");
+        }
+      } finally {
+        mpState.saving = false;
+        btn.disabled = false;
+        btn.textContent = "Save Changes";
+      }
+    };
+
+    window.deleteMyProfile = async function () {
+      if (!mpState) return;
+      if (mpState.deleteConfirmText !== mpState.slug) return;
+      const btn = document.getElementById("mpDelete");
+      btn.disabled = true;
+      btn.textContent = "Signing…";
+      try {
+        mpSetStatus("Approve the signature request in your wallet.", "info");
+        const auth = await requestSignedChallenge("delete-profile");
+        btn.textContent = "Deleting…";
+        const r = await fetch(`${API_BASE}/api/v1/profiles/${encodeURIComponent(mpState.slug)}`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(auth),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error || "Server rejected the delete");
+        mpSetStatus(`✓ Profile deleted. Redirecting…`, "ok");
+        setTimeout(() => { switchPage("portfolio"); }, 900);
+      } catch (e) {
+        const msg = String(e?.message || e);
+        if (/reject|denied|cancel|closed/i.test(msg)) {
+          mpSetStatus("Signature request was cancelled.", "err");
+        } else {
+          mpSetStatus("Delete failed: " + msg, "err");
+        }
+        btn.disabled = mpState.deleteConfirmText !== mpState.slug;
+        btn.textContent = "Delete Profile";
+      }
+    };
 
     window.submitCreateProfile = async function () {
       if (cpState.submitting) return;

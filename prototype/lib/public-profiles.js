@@ -143,6 +143,20 @@ function removeWalletFromProfile(slug, address) {
   db.prepare("DELETE FROM profile_wallets WHERE profile_id = ? AND address = ?").run(profile.id, address);
 }
 
+// Returns full profile records for every profile that includes `address`
+// in its wallets. Used by the SPA to detect whether the connected wallet
+// already owns a profile so it can switch from Create → Manage.
+function listProfilesByWallet(address) {
+  if (!address || typeof address !== "string") return [];
+  const rows = db.prepare(`
+    SELECT p.slug FROM public_profiles p
+    JOIN profile_wallets pw ON pw.profile_id = p.id
+    WHERE pw.address = ? AND p.is_public = 1
+    ORDER BY p.created_at DESC
+  `).all(address);
+  return rows.map(r => getProfile(r.slug)).filter(Boolean);
+}
+
 function listPublicProfiles(limit = 50) {
   return db.prepare(`
     SELECT p.slug, p.display_name, p.avatar_emoji, p.bio, p.created_at, COUNT(pw.id) as wallet_count
@@ -156,5 +170,6 @@ function listPublicProfiles(limit = 50) {
 
 module.exports = {
   createProfile, getProfile, updateProfile, deleteProfile,
-  addWalletToProfile, removeWalletFromProfile, listPublicProfiles, isSlugAvailable,
+  addWalletToProfile, removeWalletFromProfile, listPublicProfiles,
+  listProfilesByWallet, isSlugAvailable,
 };
