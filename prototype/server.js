@@ -25,9 +25,19 @@ const { resolveSorobanCollectibles } = require("./lib/collectibles-resolver");
 const { getTickerPrices } = require("./lib/price-ticker");
 
 const app = express();
+// Railway/Cloudflare terminate TLS one hop in front of us. Without this,
+// req.ip resolves to the proxy's IP and rate-limiting buckets every user
+// into one shared quota.
+app.set("trust proxy", 1);
 app.use(cors());
-app.use(express.json());
+// Cap request body size so a rogue POST can't exhaust memory.
+app.use(express.json({ limit: "50kb" }));
 app.use(express.static(path.join(__dirname, "public")));
+
+// Per-IP rate limit applied to the entire API surface. Public routes previously
+// used this only selectively; internal routes had no limit. Apply globally.
+const { rateLimitMiddleware } = require("./lib/api-keys");
+app.use("/api/v1", rateLimitMiddleware);
 
 // Mainnet only — read-only portfolio tracker
 const HORIZON_URL = "https://horizon.stellar.org";

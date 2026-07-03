@@ -2,12 +2,27 @@
  * Public API + Public Profile Routes
  *
  * All endpoints are open — no API key needed. Stellar data is public.
- * Rate limited by IP to prevent abuse (60 req/min).
+ * Rate limiting is applied globally to /api/v1 in server.js — no per-route
+ * middleware here (double-count avoidance).
  */
 const express = require("express");
-const { rateLimitMiddleware } = require("./api-keys");
 const profiles = require("./public-profiles");
 const historyDb = require("./history-db");
+
+// Escape user-controlled strings before injecting into server-rendered HTML.
+// The profile page renders displayName/bio/avatarEmoji directly into the DOM
+// and shares an origin with the main SPA (which stores Freighter wallet-
+// connection state) — unescaped output here is a wallet-hijack surface, not
+// just cosmetic XSS.
+function htmlEscape(s) {
+  if (s == null) return "";
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 
 function createRouter(fetchPortfolioFn) {
   const router = express.Router();
@@ -16,7 +31,7 @@ function createRouter(fetchPortfolioFn) {
   // PUBLIC API — open, rate-limited by IP
   // ══════════════════════════════════════════════════════════════════════════
 
-  router.get("/api/v1/public/account/:address", rateLimitMiddleware, async (req, res) => {
+  router.get("/api/v1/public/account/:address", async (req, res) => {
     try {
       const data = await fetchPortfolioFn(req.params.address);
       res.json({
@@ -33,7 +48,7 @@ function createRouter(fetchPortfolioFn) {
     }
   });
 
-  router.get("/api/v1/public/account/:address/history", rateLimitMiddleware, (req, res) => {
+  router.get("/api/v1/public/account/:address/history", (req, res) => {
     try {
       const { address } = req.params;
       const range = req.query.range || "30d";
@@ -50,7 +65,7 @@ function createRouter(fetchPortfolioFn) {
     }
   });
 
-  router.get("/api/v1/public/account/:address/snapshot", rateLimitMiddleware, (req, res) => {
+  router.get("/api/v1/public/account/:address/snapshot", (req, res) => {
     try {
       const { date } = req.query;
       if (!date) return res.status(400).json({ error: "?date= required (ISO timestamp)" });
@@ -168,9 +183,9 @@ function createRouter(fetchPortfolioFn) {
 
     res.send(`<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>${profile.displayName} — Stellar Scope</title>
-<meta name="description" content="${profile.bio || profile.displayName + "'s Stellar portfolio"}">
-<meta property="og:title" content="${profile.displayName} — Stellar Scope">
+<title>${htmlEscape(profile.displayName)} — Stellar Scope</title>
+<meta name="description" content="${htmlEscape(profile.bio || profile.displayName + "'s Stellar portfolio")}">
+<meta property="og:title" content="${htmlEscape(profile.displayName)} — Stellar Scope">
 <style>
 :root{--bg:#0a0e17;--card:#1a2332;--border:#2a3a4e;--text:#e2e8f0;--muted:#94a3b8;--accent:#6366f1;--green:#22c55e;--red:#ef4444}
 *{margin:0;padding:0;box-sizing:border-box}
@@ -200,41 +215,42 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 </style></head><body>
 <div class="header"><a class="logo" href="/">Stellar Scope</a><span class="badge">Public Portfolio</span></div>
 <div class="hero">
-  <div class="avatar">${profile.avatarEmoji}</div>
-  <div class="name">${profile.displayName}</div>
-  ${profile.bio ? `<div class="bio">${profile.bio}</div>` : ""}
+  <div class="avatar">${htmlEscape(profile.avatarEmoji)}</div>
+  <div class="name">${htmlEscape(profile.displayName)}</div>
+  ${profile.bio ? `<div class="bio">${htmlEscape(profile.bio)}</div>` : ""}
   <div id="tv" class="total" style="display:none"></div>
   <div class="wcount">${profile.wallets.length} wallet${profile.wallets.length !== 1 ? "s" : ""}</div>
 </div>
 <div class="content" id="content"><div class="loading"><div class="spinner"></div>Loading portfolio...</div></div>
 <script>
+function esc(s){if(s==null)return"";return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;")}
 function fmt(n,d=2){if(n==null)return"—";return new Intl.NumberFormat("en-US",{minimumFractionDigits:d,maximumFractionDigits:d}).format(n)}
 function fmtUSD(n){return n==null?"—":"$"+fmt(n)}
 function short(a){return a?a.slice(0,6)+"..."+a.slice(-4):""}
 async function load(){
   try{
-    const r=await fetch("/api/v1/profiles/${profile.slug}/portfolio");
+    const r=await fetch("/api/v1/profiles/${encodeURIComponent(profile.slug)}/portfolio");
     const d=await r.json();render(d);
   }catch(e){document.getElementById("content").innerHTML='<div class="loading">Failed to load</div>'}}
 function render(d){
-  if(${profile.showBalances}&&d.totalValueUSD!=null){const el=document.getElementById("tv");el.textContent=fmtUSD(d.totalValueUSD);el.style.display="block"}
+  if(${profile.showBalances ? "true" : "false"}&&d.totalValueUSD!=null){const el=document.getElementById("tv");el.textContent=fmtUSD(d.totalValueUSD);el.style.display="block"}
   let h="";
   for(const w of d.wallets){
     h+='<div class="wcard"><div class="wheader"><div>';
-    h+='<div class="wlabel">'+(w.label||"Wallet")+'</div>';
-    h+='<div class="waddr">'+short(w.address)+'</div></div>';
-    if(${profile.showBalances}&&w.totalValueUSD!=null)h+='<div class="wval">'+fmtUSD(w.totalValueUSD)+'</div>';
+    h+='<div class="wlabel">'+esc(w.label||"Wallet")+'</div>';
+    h+='<div class="waddr">'+esc(short(w.address))+'</div></div>';
+    if(${profile.showBalances ? "true" : "false"}&&w.totalValueUSD!=null)h+='<div class="wval">'+fmtUSD(w.totalValueUSD)+'</div>';
     h+='</div>';
-    if(${profile.showBalances}&&w.balances){
+    if(${profile.showBalances ? "true" : "false"}&&w.balances){
       for(const t of w.balances.filter(b=>b.type!=="lp_share")){
-        h+='<div class="trow"><div><div class="tname">'+(t.asset?.code||"XLM")+'</div>';
+        h+='<div class="trow"><div><div class="tname">'+esc(t.asset?.code||"XLM")+'</div>';
         h+='<div class="tbal">'+fmt(parseFloat(t.balance),4)+'</div></div>';
         h+='<div class="tval">'+(t.valueUSD>0?fmtUSD(t.valueUSD):"—")+'</div></div>';
       }}
-    if(${profile.showDefi}&&w.defiPositions?.length>0){
+    if(${profile.showDefi ? "true" : "false"}&&w.defiPositions?.length>0){
       for(const p of w.defiPositions){
-        h+='<div class="trow"><div><div class="tname" style="color:var(--accent)">'+(p.protocol||"DeFi").toUpperCase()+'</div>';
-        h+='<div class="tbal">'+(p.type||"")+" — "+(p.asset||"")+'</div></div>';
+        h+='<div class="trow"><div><div class="tname" style="color:var(--accent)">'+esc((p.protocol||"DeFi").toUpperCase())+'</div>';
+        h+='<div class="tbal">'+esc(p.type||"")+" — "+esc(p.asset||"")+'</div></div>';
         if(p.underlyingAmount)h+='<div class="tval">'+fmt(p.underlyingAmount,4)+'</div>';
         h+='</div>';
       }}
