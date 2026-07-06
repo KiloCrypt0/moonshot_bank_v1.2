@@ -4103,18 +4103,54 @@
     }
 
     // ── Multi-Wallet Management ────────────────────────────────
+    //
+    // Wallet lists are BROWSER-LOCAL, not server-global. Previously the SPA
+    // read from GET /api/v1/wallets which returned a shared table — meaning
+    // one user's tracked wallets appeared in every other visitor's "My
+    // Portfolio" view. That was a real privacy leak (a friend visiting
+    // stellarscope.xyz could see anyone else's connected wallet).
+    //
+    // Now: each browser stores its own wallet list in localStorage under
+    // WALLETLIST_KEY. The server-side table still exists to power scheduled
+    // portfolio snapshots — add/remove operations forward to the server so
+    // that history keeps accumulating — but the server never returns the
+    // list back to the browser.
+
+    const WALLETLIST_KEY = "stellarscope.walletList";
+
+    function loadWalletListLocal() {
+      try {
+        const raw = localStorage.getItem(WALLETLIST_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) return parsed;
+        }
+      } catch (e) { /* ignore */ }
+      return [];
+    }
+    function saveWalletListLocal(list) {
+      try {
+        localStorage.setItem(WALLETLIST_KEY, JSON.stringify(list.map(w => ({
+          address: w.address, label: w.label || null, network: w.network || "mainnet",
+        }))));
+      } catch (e) { /* ignore quota errors */ }
+    }
 
     async function loadWalletList() {
-      try {
-        const res = await fetch(`${API_BASE}/api/v1/wallets`);
-        if (!res.ok) throw new Error("Failed to load wallets");
-        const data = await res.json();
-        walletList = data.wallets || [];
-        return walletList;
-      } catch (e) {
-        console.error("Load wallet list error:", e);
-        return [];
+      walletList = loadWalletListLocal();
+      // Migration: if the browser has a previously-connected Freighter address
+      // but no walletList yet, seed the list with that wallet so returning users
+      // aren't greeted by an empty portfolio.
+      if (walletList.length === 0) {
+        try {
+          const connected = localStorage.getItem(CONNECTED_ADDR_KEY);
+          if (connected && /^G[A-Z2-7]{55}$/.test(connected)) {
+            walletList = [{ address: connected, label: null, network: "mainnet" }];
+            saveWalletListLocal(walletList);
+          }
+        } catch (e) { /* ignore */ }
       }
+      return walletList;
     }
 
     async function addWalletToPortfolio(address, label) {
@@ -4122,34 +4158,29 @@
         alert("Invalid Stellar address");
         return false;
       }
-      try {
-        const res = await fetch(`${API_BASE}/api/v1/wallets`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ address, network: currentNetwork, label: label || null }),
-        });
-        if (!res.ok) throw new Error("Failed to add wallet");
-        const data = await res.json();
-        walletList = data.wallets || [];
-        return true;
-      } catch (e) {
-        alert("Failed to add wallet: " + e.message);
-        return false;
-      }
+      // De-dupe: don't add the same address twice.
+      if (walletList.some(w => w.address === address)) return true;
+      walletList = [...walletList, { address, label: label || null, network: currentNetwork }];
+      saveWalletListLocal(walletList);
+      // Fire-and-forget: register with the server so scheduled snapshots
+      // keep accumulating history. Failure doesn't block the local add.
+      fetch(`${API_BASE}/api/v1/wallets`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address, network: currentNetwork, label: label || null }),
+      }).catch((e) => console.warn("Server snapshot registration failed (non-fatal):", e));
+      return true;
     }
 
     async function removeWalletFromPortfolio(address, evt) {
       if (evt) evt.stopPropagation();
       if (!confirm("Remove this wallet from your portfolio?")) return;
-      try {
-        const res = await fetch(`${API_BASE}/api/v1/wallets/${address}`, { method: "DELETE" });
-        if (!res.ok) throw new Error("Failed to remove wallet");
-        const data = await res.json();
-        walletList = data.wallets || [];
-        await loadMultiWalletPortfolio();
-      } catch (e) {
-        alert("Failed to remove: " + e.message);
-      }
+      walletList = walletList.filter(w => w.address !== address);
+      saveWalletListLocal(walletList);
+      // Fire-and-forget: tell the server too so the DB stays clean.
+      fetch(`${API_BASE}/api/v1/wallets/${address}`, { method: "DELETE" })
+        .catch((e) => console.warn("Server wallet-remove failed (non-fatal):", e));
+      await loadMultiWalletPortfolio();
     }
 
     async function handleAddWallet() {

@@ -792,7 +792,7 @@ app.get("/api/v1/account/:address/snapshot-at", (req, res) => {
 });
 
 // Enable/disable tracking for a wallet
-app.post("/api/v1/account/:address/track", (req, res) => {
+app.post("/api/v1/account/:address/track", sameOriginOnly, (req, res) => {
   try {
     const { address } = req.params;
     const { label, tier } = req.body || {};
@@ -804,7 +804,7 @@ app.post("/api/v1/account/:address/track", (req, res) => {
   }
 });
 
-app.delete("/api/v1/account/:address/track", (req, res) => {
+app.delete("/api/v1/account/:address/track", sameOriginOnly, (req, res) => {
   try {
     const { address } = req.params;
     historyDb.untrackWallet(address);
@@ -990,18 +990,22 @@ app.get("/api/v1/rwa-stats/fetcher-status", (_req, res) => {
 
 // ── Multi-Wallet Portfolio API ───────────────────────────────────────────────
 
-// List all tracked wallets
+// List tracked wallets. DEPRECATED — the server-side table was originally
+// a globally-shared list, which meant one user's tracked wallets showed up
+// in every other visitor's "My Portfolio" view. That's a privacy leak: a
+// friend visiting stellarscope.xyz for the first time could see anyone
+// else's connected wallet.
+//
+// Wallet lists are now per-browser (localStorage in the SPA). The server
+// still receives POSTs so scheduled snapshots continue to work, but this
+// endpoint returns an empty list — nothing to leak.
 app.get("/api/v1/wallets", (req, res) => {
-  try {
-    const wallets = historyDb.getTrackedWallets();
-    res.json({ count: wallets.length, wallets });
-  } catch (e) {
-    console.error("List wallets error:", e.message);
-    res.status(500).json({ error: "Failed to list wallets" });
-  }
+  res.json({ count: 0, wallets: [] });
 });
 
-// Add a wallet to the portfolio
+// Add a wallet to the portfolio. Response only echoes the wallet that was
+// added — NOT the full tracked_wallets list (that used to leak everyone's
+// tracked wallets to any caller who POSTed).
 app.post("/api/v1/wallets", sameOriginOnly, (req, res) => {
   try {
     const { address, label, tier } = req.body || {};
@@ -1009,8 +1013,7 @@ app.post("/api/v1/wallets", sameOriginOnly, (req, res) => {
       return res.status(400).json({ error: "Invalid Stellar address" });
     }
     historyDb.trackWallet(address, "mainnet", label || null, tier || "free");
-    const wallets = historyDb.getTrackedWallets();
-    res.json({ success: true, address, wallets });
+    res.json({ success: true, address });
   } catch (e) {
     console.error("Add wallet error:", e.message);
     res.status(500).json({ error: "Failed to add wallet" });
@@ -1018,7 +1021,7 @@ app.post("/api/v1/wallets", sameOriginOnly, (req, res) => {
 });
 
 // Update a wallet label
-app.patch("/api/v1/wallets/:address", (req, res) => {
+app.patch("/api/v1/wallets/:address", sameOriginOnly, (req, res) => {
   try {
     const { address } = req.params;
     const { label } = req.body || {};
@@ -1030,13 +1033,13 @@ app.patch("/api/v1/wallets/:address", (req, res) => {
   }
 });
 
-// Remove a wallet from the portfolio
-app.delete("/api/v1/wallets/:address", (req, res) => {
+// Remove a wallet from the portfolio. Same as POST — response echoes only
+// what was removed, never the full list.
+app.delete("/api/v1/wallets/:address", sameOriginOnly, (req, res) => {
   try {
     const { address } = req.params;
     historyDb.untrackWallet(address);
-    const wallets = historyDb.getTrackedWallets();
-    res.json({ success: true, address, wallets });
+    res.json({ success: true, address });
   } catch (e) {
     console.error("Remove wallet error:", e.message);
     res.status(500).json({ error: "Failed to remove wallet" });
@@ -1048,12 +1051,10 @@ app.post("/api/v1/portfolio", async (req, res) => {
   try {
     const { addresses } = req.body || {};
 
-    // If no addresses provided, use all tracked wallets
-    let walletAddresses = addresses;
-    if (!walletAddresses || walletAddresses.length === 0) {
-      const tracked = historyDb.getTrackedWallets();
-      walletAddresses = tracked.map((w) => w.address);
-    }
+    // Callers must supply addresses. Previously we defaulted to the global
+    // tracked_wallets list when addresses were empty — that leaked every
+    // tracked wallet's balances to any caller.
+    const walletAddresses = Array.isArray(addresses) ? addresses : [];
 
     if (walletAddresses.length === 0) {
       return res.json({
@@ -1228,11 +1229,9 @@ app.post("/api/v1/portfolio/history", (req, res) => {
     const { addresses } = req.body || {};
     const range = req.query.range || "30d";
 
-    let walletAddresses = addresses;
-    if (!walletAddresses || walletAddresses.length === 0) {
-      const tracked = historyDb.getTrackedWallets();
-      walletAddresses = tracked.map((w) => w.address);
-    }
+    // Callers must supply addresses. Previously we defaulted to the global
+    // tracked_wallets list when addresses were empty — a privacy leak.
+    const walletAddresses = Array.isArray(addresses) ? addresses : [];
 
     // Get history for each wallet and merge by timestamp
     const timeMap = new Map(); // timestamp → { totalValueUSD, perWallet }
