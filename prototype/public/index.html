@@ -2097,8 +2097,36 @@
     .rwa-page-subtitle {
       color: var(--text-muted);
       font-size: 14px;
-      margin-bottom: 28px;
+      margin-bottom: 16px;
     }
+
+    .rwa-search {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .rwa-search-input {
+      flex: 1;
+      max-width: 480px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      color: var(--text-primary);
+      font-size: 14px;
+      font-family: inherit;
+    }
+    .rwa-search-input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .rwa-search-input::placeholder { color: var(--text-muted); }
+    .rwa-search-count {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .rwa-hidden { display: none !important; }
 
     .rwa-category {
       margin-bottom: 32px;
@@ -2795,10 +2823,11 @@
   </div>
 
   <script>
-    // ── Go Home ───────────────────────────────────────────────
-    function goHome() {
-      location.reload();
-    }
+    // The real goHome is defined further down in this script (near the
+    // portfolio-mode helpers). This stub is intentionally empty — a
+    // fallback in case the logo is clicked before the second definition
+    // is parsed. The later definition overrides at load time.
+    function goHome() { /* replaced later */ }
 
     function lookUpWhale(address) {
       document.getElementById('addressInput').value = address;
@@ -3457,12 +3486,16 @@
         <div class="rwa-page">
           <div class="rwa-page-title">Real-World Assets on Stellar</div>
           <div class="rwa-page-subtitle">${total} asset${total !== 1 ? "s" : ""} across ${categories.length} categor${categories.length !== 1 ? "ies" : "y"}.</div>
+          <div class="rwa-search">
+            <input class="rwa-search-input" id="rwaSearchInput" type="search" placeholder="Search by code, issuer, or contract address (e.g. USTBL, Spiko, CBZ4DC)" autocomplete="off" />
+            <div class="rwa-search-count" id="rwaSearchCount"></div>
+          </div>
       `;
 
       for (const cat of categories) {
         const count = (cat.assets || []).length;
         html += `
-          <div class="rwa-category">
+          <div class="rwa-category" data-rwa-cat="${escapeHtml(cat.id || cat.name)}">
             <div class="rwa-category-header">
               <div class="rwa-category-name">${escapeHtml(cat.name)}</div>
               <div class="rwa-category-count">${count} asset${count !== 1 ? "s" : ""}</div>
@@ -3484,8 +3517,14 @@
               ? `<div class="rwa-asset-yield-cell"><div class="rwa-asset-yield">${escapeHtml(a.yield7d)}</div>${renderAsOf(a.statsAsOf, a.statsSource)}</div>`
               : `<div class="rwa-asset-yield-cell"><div class="rwa-asset-yield empty">—</div></div>`;
             const href = `#/rwa/${rwaSlug(a)}`;
+            // Concatenate everything a user might type in the search box so the
+            // filter can just do a substring check. Lowercased once at render.
+            const searchable = [
+              a.code, a.issuerName, a.notes, a.description, address,
+              isSoroban ? "soroban" : "classic",
+            ].filter(Boolean).join(" ").toLowerCase();
             html += `
-              <a class="rwa-asset-row" href="${href}">
+              <a class="rwa-asset-row" href="${href}" data-rwa-search="${escapeHtml(searchable)}">
                 <div class="rwa-asset-code"><span class="rwa-asset-code-text">${escapeHtml(a.code)}</span>${kindBadge}</div>
                 <div>
                   <div class="rwa-asset-issuer">${escapeHtml(a.issuerName || "Unknown issuer")}</div>
@@ -3503,6 +3542,41 @@
 
       html += `</div>`;
       app.innerHTML = html;
+
+      // Wire the filter after the DOM is in place.
+      const searchInput = document.getElementById("rwaSearchInput");
+      if (searchInput) {
+        searchInput.addEventListener("input", (e) => filterRwaCatalog(e.target.value));
+      }
+    }
+
+    // Client-side filter for the RWA catalog. Matches against the concatenated
+    // data-rwa-search attribute on each row (asset code, issuer name, notes,
+    // description, address, and Soroban/Classic kind). Categories with zero
+    // visible rows are hidden entirely so the list doesn't sprout empty
+    // headers.
+    function filterRwaCatalog(rawQuery) {
+      const query = (rawQuery || "").trim().toLowerCase();
+      const rows = document.querySelectorAll(".rwa-asset-row[data-rwa-search]");
+      let matchCount = 0;
+      rows.forEach((row) => {
+        const hay = row.getAttribute("data-rwa-search") || "";
+        const matches = !query || hay.includes(query);
+        row.classList.toggle("rwa-hidden", !matches);
+        if (matches) matchCount++;
+      });
+      // Hide/show category sections based on whether they have any visible rows.
+      document.querySelectorAll(".rwa-category").forEach((cat) => {
+        const anyVisible = cat.querySelector(".rwa-asset-row:not(.rwa-hidden)");
+        cat.classList.toggle("rwa-hidden", !!query && !anyVisible);
+      });
+      // Match-count chip
+      const countEl = document.getElementById("rwaSearchCount");
+      if (countEl) {
+        countEl.textContent = query
+          ? `${matchCount} match${matchCount !== 1 ? "es" : ""}`
+          : "";
+      }
     }
 
     // Returns the Stellar Expert URL for an asset (classic OR Soroban).
@@ -4767,6 +4841,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
     // ── Portfolio Mode Entry ────────────────────────────────────
 
     function goHome() {
+      // Reset per-view state so the welcome screen renders clean.
       currentData = null;
       historyData = null;
       claimableData = null;
@@ -4778,7 +4853,11 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
       currentTab = "tokens";
       const input = document.getElementById("addressInput");
       if (input) input.value = "";
-      document.getElementById("app").innerHTML = WELCOME_HTML;
+      // Delegate to switchPage — it clears the hash (so /rwa isn't left over),
+      // resets the nav tab back to Portfolio, and re-renders the welcome HTML.
+      // Previously goHome only swapped innerHTML directly, leaving the URL
+      // stuck on #/rwas and the RWAs tab still highlighted.
+      switchPage("portfolio");
     }
 
     async function enterPortfolioMode() {
