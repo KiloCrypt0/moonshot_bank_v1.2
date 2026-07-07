@@ -146,6 +146,32 @@
       }
     };
 
+    // Same as connectWalletViaModal but does NOT call enterPortfolioMode
+    // at the end — so if the user is on the Profile tab, they stay there
+    // and the tab re-renders in place. Lives in the module scope because
+    // StellarWalletsKit is only imported here; the onclick handler in the
+    // Profile UI reaches it via window.
+    window.connectWalletFromProfile = async function () {
+      try {
+        const { address } = await StellarWalletsKit.authModal();
+        try { localStorage.setItem(CONNECTED_ADDR_KEY, address); } catch (e) {}
+        setConnectedButtonState(address);
+        // Best-effort: register with the local wallet list so scheduled
+        // snapshots work. Failures here shouldn't block the profile flow.
+        if (typeof window.addWalletToPortfolio === "function") {
+          try { await window.addWalletToPortfolio(address, null); } catch (e) {}
+        }
+        // Re-render the Profile tab in place so cpState picks up the wallet.
+        if (typeof window.renderCreateProfilePage === "function") {
+          await window.renderCreateProfilePage();
+        }
+      } catch (e) {
+        if (e && (e.code === -1 || /closed/i.test(e.message || ""))) return;
+        const msg = e?.message || String(e);
+        alert("Could not connect: " + msg);
+      }
+    };
+
     // On page load, if a connected address was remembered, restore the
     // visual state so the button doesn't claim "Connect Wallet" after a
     // refresh. The kit itself doesn't expose a "stay-signed-in" hook, so
@@ -3001,27 +3027,9 @@
       return `<div class="rwa-stat-asof${stale ? " stale" : ""}"${title}>as of ${escapeHtml(statsAsOf)}${stale ? " (stale)" : ""}</div>`;
     }
 
-    // Connect a wallet from within the Profile tab. Unlike connectWalletViaModal
-    // (which ends by calling enterPortfolioMode and switching pages), this
-    // stays on the Profile tab and just re-renders so cpState picks up the
-    // newly-connected wallet.
-    window.connectWalletFromProfile = async function () {
-      try {
-        const { address } = await StellarWalletsKit.authModal();
-        try { localStorage.setItem(CONNECTED_ADDR_KEY, address); } catch (e) {}
-        setConnectedButtonState(address);
-        // Best-effort: also register with the local wallet list so scheduled
-        // snapshots work. Failures here shouldn't block the profile flow.
-        if (typeof window.addWalletToPortfolio === "function") {
-          try { await window.addWalletToPortfolio(address, null); } catch (e) {}
-        }
-        await renderCreateProfilePage();
-      } catch (e) {
-        // -1 with "closed" is the user dismissing the wallet picker — stay silent
-        if (e && (e.code === -1 || /closed/i.test(e.message || ""))) return;
-        alert("Could not connect: " + (e?.message || e));
-      }
-    };
+    // connectWalletFromProfile now lives in the module script (near
+    // connectWalletViaModal) where StellarWalletsKit is imported. The
+    // onclick handler reaches it via window.
 
     // ── Create Profile ─────────────────────────────────────────────────────
     // Builds a public /p/{slug} profile linking a display name + optional bio
@@ -3044,22 +3052,24 @@
       submitting: false,
     };
 
+    window.renderCreateProfilePage = renderCreateProfilePage; // exposed so the module-script Connect handler can trigger a re-render
     async function renderCreateProfilePage() {
       const app = document.getElementById("app");
-      // Sync cpState.wallet from localStorage on every render. Previously
-      // this was gated by `!cpState.wallet` — so once the tab rendered with
-      // no wallet, subsequent renders wouldn't pick up a wallet the user
-      // had connected in the meantime (via the header button). Reading
-      // fresh each time makes the source-of-truth crystal clear:
-      // whatever the header shows as connected IS what we use here.
+      // Sync cpState.wallet from localStorage on every render — whatever the
+      // header shows as connected IS what we use here.
+      let cpDebugRaw = null;
       try {
         const saved = localStorage.getItem(CONNECTED_ADDR_KEY);
+        cpDebugRaw = saved;
         if (saved && /^G[A-Z2-7]{55}$/.test(saved)) {
           cpState.wallet = { address: saved };
         } else {
           cpState.wallet = null;
         }
       } catch (e) { cpState.wallet = null; }
+      // Temporary diagnostic — a single console.log so if something is off,
+      // we can inspect localStorage directly from DevTools.
+      console.log("[profile] localStorage[" + CONNECTED_ADDR_KEY + "] =", JSON.stringify(cpDebugRaw), "-> cpState.wallet =", cpState.wallet);
 
       // If the connected wallet already owns a profile, jump straight to the
       // manage view instead of showing the create form. Users rarely have
