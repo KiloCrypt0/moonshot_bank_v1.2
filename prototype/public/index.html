@@ -2342,6 +2342,15 @@
     }
     .rwa-stat-asof.stale { color: var(--orange, #f59e0b); }
 
+    .rwa-stat-sourcelink {
+      display: inline-block;
+      margin-top: 4px;
+      font-size: 11px;
+      color: var(--accent);
+      text-decoration: none;
+    }
+    .rwa-stat-sourcelink:hover { text-decoration: underline; }
+
     /* Create Profile page */
     .cp-page { max-width: 640px; margin: 24px auto; padding: 0 20px; }
     .cp-title { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
@@ -2916,6 +2925,7 @@
         marketCap: s.marketCap || a.marketCap || null,
         statsAsOf: s.asOf || null,
         statsSource: s.source || null,
+        statsSourceUrl: s.sourceUrl || null,
         tvlSource: s.tvlSource || null,
         trust: a.trust || null,
       };
@@ -3613,8 +3623,11 @@
         venues.push({ name: "Stellar Expert", url: expertUrl });
       }
 
+      const sourceLinkHtml = a.statsSourceUrl
+        ? `<a class="rwa-stat-sourcelink" href="${escapeHtml(a.statsSourceUrl)}" target="_blank" rel="noopener" title="${escapeHtml(a.statsSource || 'Source')}">* Reference →</a>`
+        : "";
       const yieldStatHtml = a.yield7d
-        ? `<div class="rwa-stat-value yield">${escapeHtml(a.yield7d)}</div>${renderAsOf(a.statsAsOf, a.statsSource)}`
+        ? `<div class="rwa-stat-value yield">${escapeHtml(a.yield7d)}</div>${renderAsOf(a.statsAsOf, a.statsSource)}${sourceLinkHtml}`
         : `<div class="rwa-stat-value muted">—</div>`;
       const marketCapStatHtml = a.marketCap
         ? `<div class="rwa-stat-value">${escapeHtml(a.marketCap)}</div>${renderAsOf(a.statsAsOf, a.tvlSource || a.statsSource)}`

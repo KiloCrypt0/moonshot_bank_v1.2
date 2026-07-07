@@ -939,6 +939,9 @@ app.get("/api/v1/rwa-stats", async (req, res) => {
           if (fresh.yield7d) {
             entry.yield7d = fresh.yield7d;
             entry.source = fresh.source || entry.source;
+            // Optional: some fetchers (e.g. Babylon → xSolvBTC) attach a
+            // reference URL so the UI can render a clickable footnote.
+            if (fresh.sourceUrl) entry.sourceUrl = fresh.sourceUrl;
           }
           if (fresh.tvl) {
             entry.marketCap = fresh.tvl;

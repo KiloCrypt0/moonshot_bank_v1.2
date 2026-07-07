@@ -350,6 +350,51 @@ async function fetchOndo() {
   }
 }
 
+// ── Babylon (xSolvBTC underlying yield reference) ──────────────────────────
+// Solv doesn't expose a public API. xSolvBTC (aka SolvBTC.BBN) accrues yield
+// from Babylon Bitcoin staking, so we show Babylon's own displayed range
+// (base APR – max APR) as the reference rate — matching what users see on
+// staking.babylonlabs.io/btc.
+//
+// Important nuance: yield distribution to Stellar xSolvBTC holders is
+// paused pending LayerZero, so the number shown here is the underlying
+// protocol rate, NOT what a Stellar holder currently earns. The source
+// label carries that caveat.
+
+const BABYLON_STATS_URL = "https://staking-api.babylonlabs.io/v2/stats";
+const BABYLON_STAKING_URL = "https://staking.babylonlabs.io/btc";
+
+async function fetchBabylon() {
+  try {
+    const res = await fetch(BABYLON_STATS_URL);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    const d = json?.data;
+    const baseApr = Number(d?.btc_staking_apr);
+    const maxApr = Number(d?.max_staking_apr);
+    if (!Number.isFinite(baseApr) || !Number.isFinite(maxApr)) {
+      throw new Error("apr fields missing from response");
+    }
+    // Babylon returns fractional APR (0.0005 = 0.05%). Multiply for display.
+    const basePct = (baseApr * 100).toFixed(2);
+    const maxPct = (maxApr * 100).toFixed(2);
+    return {
+      "xsolvbtc-caup7n": {
+        // Range with an asterisk pointing to the source URL. Rendered as text
+        // in the list view; the detail page renders a clickable link via
+        // sourceUrl below.
+        yield7d: `${basePct}% – ${maxPct}%*`,
+        asOf: todayISO(),
+        source: "Babylon BTC staking APR — base is BTC-only; max requires co-staking BABY. Whether xSolvBTC holders receive base or max depends on Solv's staking strategy. Stellar distribution paused pending LayerZero.",
+        sourceUrl: BABYLON_STAKING_URL,
+      },
+    };
+  } catch (e) {
+    console.warn(`[rwa-yield-fetcher] Babylon failed: ${e.message}`);
+    return {};
+  }
+}
+
 // ── Soroban RPC supply pass (tvl only) ──────────────────────────────────────
 // For Soroban-native tokens whose issuers don't expose a supply API, we query
 // total_supply directly and price the result via a per-token hint.
@@ -406,6 +451,7 @@ const REFRESHERS = [
   { name: "spiko",      fn: fetchSpiko },            // USTBL, EUTBL, UKTBL, SAFO (yield + tvl)
   { name: "etherfuse",  fn: fetchEtherfuse },        // USTRY, CETES, TESOURO (yield + tvl)
   { name: "ondo",       fn: fetchOndo },             // USDY (yield only)
+  { name: "babylon",    fn: fetchBabylon },          // xSolvBTC (yield reference only — actual distribution paused)
   { name: "soroban",    fn: fetchSorobanSupplies }, // USST, XAUM, SOLVBTC, XSOLVBTC, EURAU (tvl only)
 ];
 
