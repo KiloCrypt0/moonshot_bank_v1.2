@@ -106,25 +106,33 @@ function verifyAndConsume({ token, address, signatureBase64, expectedAction, exp
   if (sig.length !== 64) throw new Error("Signature has wrong length");
 
   const kp = Keypair.fromPublicKey(address);
-  // Wallets vary on how they wrap message signing:
-  //   1. Raw:      ed25519.sign(msg_bytes)                  — some libraries
-  //   2. SEP-53:   ed25519.sign("Stellar Signed Message:\n" + msg_bytes)
-  //                                                           — Stellar Wallets Kit / Freighter
-  // Try both and accept whichever verifies. Log which one won so we can
-  // simplify later once wallet behavior is confirmed.
+  // Wallets vary on how they wrap message signing. Try every reasonable
+  // encoding and accept whichever verifies:
+  //   1. raw       ed25519.sign(msg_bytes)
+  //   2. sep53     ed25519.sign("Stellar Signed Message:\n" + msg_bytes)
+  //   3. rawHash   ed25519.sign(sha256(msg_bytes))
+  //   4. sep53Hash ed25519.sign(sha256("Stellar Signed Message:\n" + msg_bytes))
+  // Logs which one won so we can simplify later once wallet behavior is
+  // confirmed across the wallets people actually use.
   const rawBytes = Buffer.from(message, "utf8");
   const sep53Bytes = Buffer.concat([
     Buffer.from("Stellar Signed Message:\n", "utf8"),
     rawBytes,
   ]);
-  let ok = kp.verify(rawBytes, sig);
-  let format = ok ? "raw" : null;
-  if (!ok) {
-    ok = kp.verify(sep53Bytes, sig);
-    if (ok) format = "sep53";
+  const sha = (b) => crypto.createHash("sha256").update(b).digest();
+  const variants = [
+    ["raw",       rawBytes],
+    ["sep53",     sep53Bytes],
+    ["rawHash",   sha(rawBytes)],
+    ["sep53Hash", sha(sep53Bytes)],
+  ];
+  let ok = false;
+  let format = null;
+  for (const [name, bytes] of variants) {
+    if (kp.verify(bytes, sig)) { ok = true; format = name; break; }
   }
   if (ok) console.log(`[profile-auth] verified via ${format} for ${address.slice(0,8)}…`);
-  else console.warn(`[profile-auth] verify FAILED for ${address.slice(0,8)}… (tried raw + sep53); sig=${sig.length}b`);
+  else console.warn(`[profile-auth] verify FAILED for ${address.slice(0,8)}… (tried ${variants.map(v => v[0]).join(", ")}); sig=${sig.length}b, msgLen=${rawBytes.length}b`);
   if (!ok) throw new Error("Signature verification failed");
 
   _pending.delete(token); // single-use — no replay

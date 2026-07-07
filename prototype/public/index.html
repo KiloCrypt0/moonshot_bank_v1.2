@@ -3487,9 +3487,21 @@
         // 2. Ask the wallet to sign the challenge message.
         btn.textContent = "Signing (check your wallet)…";
         cpSetStatus("Approve the signature request in your wallet.", "info");
+        console.log("[profile] signing message:", JSON.stringify(ch.message));
         const signResult = await StellarWalletsKit.signMessage(ch.message);
+        // Dump the raw wallet response so we can see exactly what shape it
+        // returns — different wallets and SWK versions vary here.
+        console.log("[profile] signMessage returned:", signResult);
+        console.log("[profile] typeof / keys:", typeof signResult, signResult && Object.keys(signResult));
         // Stellar Wallets Kit returns { signedMessage } — base64 ed25519 signature over the message bytes.
-        const signature = signResult?.signedMessage || signResult?.signature || signResult;
+        // Some wallets may return a Buffer / Uint8Array instead; normalise here.
+        let signature = signResult?.signedMessage ?? signResult?.signature ?? signResult;
+        if (signature && typeof signature === "object" && signature.type === "Buffer" && Array.isArray(signature.data)) {
+          signature = btoa(String.fromCharCode.apply(null, signature.data));
+        } else if (signature instanceof Uint8Array) {
+          signature = btoa(String.fromCharCode.apply(null, signature));
+        }
+        console.log("[profile] extracted signature (first 32 chars):", typeof signature === "string" ? signature.slice(0, 32) + "…" : signature, "length:", typeof signature === "string" ? signature.length : "n/a");
         if (!signature || typeof signature !== "string") {
           throw new Error("Wallet returned an unexpected signature format");
         }
