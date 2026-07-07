@@ -106,7 +106,25 @@ function verifyAndConsume({ token, address, signatureBase64, expectedAction, exp
   if (sig.length !== 64) throw new Error("Signature has wrong length");
 
   const kp = Keypair.fromPublicKey(address);
-  const ok = kp.verify(Buffer.from(message, "utf8"), sig);
+  // Wallets vary on how they wrap message signing:
+  //   1. Raw:      ed25519.sign(msg_bytes)                  — some libraries
+  //   2. SEP-53:   ed25519.sign("Stellar Signed Message:\n" + msg_bytes)
+  //                                                           — Stellar Wallets Kit / Freighter
+  // Try both and accept whichever verifies. Log which one won so we can
+  // simplify later once wallet behavior is confirmed.
+  const rawBytes = Buffer.from(message, "utf8");
+  const sep53Bytes = Buffer.concat([
+    Buffer.from("Stellar Signed Message:\n", "utf8"),
+    rawBytes,
+  ]);
+  let ok = kp.verify(rawBytes, sig);
+  let format = ok ? "raw" : null;
+  if (!ok) {
+    ok = kp.verify(sep53Bytes, sig);
+    if (ok) format = "sep53";
+  }
+  if (ok) console.log(`[profile-auth] verified via ${format} for ${address.slice(0,8)}…`);
+  else console.warn(`[profile-auth] verify FAILED for ${address.slice(0,8)}… (tried raw + sep53); sig=${sig.length}b`);
   if (!ok) throw new Error("Signature verification failed");
 
   _pending.delete(token); // single-use — no replay
