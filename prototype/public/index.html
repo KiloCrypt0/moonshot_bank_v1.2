@@ -3001,6 +3001,28 @@
       return `<div class="rwa-stat-asof${stale ? " stale" : ""}"${title}>as of ${escapeHtml(statsAsOf)}${stale ? " (stale)" : ""}</div>`;
     }
 
+    // Connect a wallet from within the Profile tab. Unlike connectWalletViaModal
+    // (which ends by calling enterPortfolioMode and switching pages), this
+    // stays on the Profile tab and just re-renders so cpState picks up the
+    // newly-connected wallet.
+    window.connectWalletFromProfile = async function () {
+      try {
+        const { address } = await StellarWalletsKit.authModal();
+        try { localStorage.setItem(CONNECTED_ADDR_KEY, address); } catch (e) {}
+        setConnectedButtonState(address);
+        // Best-effort: also register with the local wallet list so scheduled
+        // snapshots work. Failures here shouldn't block the profile flow.
+        if (typeof window.addWalletToPortfolio === "function") {
+          try { await window.addWalletToPortfolio(address, null); } catch (e) {}
+        }
+        await renderCreateProfilePage();
+      } catch (e) {
+        // -1 with "closed" is the user dismissing the wallet picker — stay silent
+        if (e && (e.code === -1 || /closed/i.test(e.message || ""))) return;
+        alert("Could not connect: " + (e?.message || e));
+      }
+    };
+
     // ── Create Profile ─────────────────────────────────────────────────────
     // Builds a public /p/{slug} profile linking a display name + optional bio
     // to one or more wallets the caller controls. Wallet control is proven by
@@ -3024,13 +3046,20 @@
 
     async function renderCreateProfilePage() {
       const app = document.getElementById("app");
-      // Preselect the currently-connected wallet from localStorage, if any.
+      // Sync cpState.wallet from localStorage on every render. Previously
+      // this was gated by `!cpState.wallet` — so once the tab rendered with
+      // no wallet, subsequent renders wouldn't pick up a wallet the user
+      // had connected in the meantime (via the header button). Reading
+      // fresh each time makes the source-of-truth crystal clear:
+      // whatever the header shows as connected IS what we use here.
       try {
         const saved = localStorage.getItem(CONNECTED_ADDR_KEY);
-        if (saved && /^G[A-Z2-7]{55}$/.test(saved) && !cpState.wallet) {
+        if (saved && /^G[A-Z2-7]{55}$/.test(saved)) {
           cpState.wallet = { address: saved };
+        } else {
+          cpState.wallet = null;
         }
-      } catch (e) {}
+      } catch (e) { cpState.wallet = null; }
 
       // If the connected wallet already owns a profile, jump straight to the
       // manage view instead of showing the create form. Users rarely have
@@ -3103,8 +3132,11 @@
               ${cpState.wallet
                 ? `<div class="cp-wallet-pill">${cpState.wallet.address.slice(0, 8)}…${cpState.wallet.address.slice(-6)}</div>
                    <div class="cp-hint" style="margin-top:8px">This wallet will be linked to the profile. You'll sign a challenge with it to prove control.</div>`
-                : `<div class="cp-wallet-pill empty">No wallet connected</div>
-                   <div class="cp-hint" style="margin-top:8px">Connect a wallet to continue — the "Connect Wallet" button in the header opens a wallet picker.</div>`}
+                : `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                     <div class="cp-wallet-pill empty">No wallet connected</div>
+                     <button class="btn" onclick="connectWalletFromProfile()" style="padding:8px 16px;font-size:13px">Connect Wallet</button>
+                   </div>
+                   <div class="cp-hint" style="margin-top:8px">You'll sign a message with the connected wallet to prove control of the profile — no funds move, no gas fee.</div>`}
             </div>
           </div>
 
