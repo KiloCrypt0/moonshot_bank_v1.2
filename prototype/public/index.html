@@ -2858,6 +2858,14 @@
   </div>
 
   <script>
+    // localStorage key for the currently-connected wallet address. The
+    // module-<script> at the top also declares this — but const inside a
+    // <script type="module"> is module-scoped and NOT visible from this
+    // regular script. Duplicating the string here means the two scripts
+    // both point at the same storage slot without either seeing the
+    // other's binding.
+    const CONNECTED_ADDR_KEY = "stellarscope.connectedWallet";
+
     // The real goHome is defined further down in this script (near the
     // portfolio-mode helpers). This stub is intentionally empty — a
     // fallback in case the logo is clicked before the second definition
@@ -3057,19 +3065,21 @@
       const app = document.getElementById("app");
       // Sync cpState.wallet from localStorage on every render — whatever the
       // header shows as connected IS what we use here.
-      let cpDebugRaw = null;
       try {
         const saved = localStorage.getItem(CONNECTED_ADDR_KEY);
-        cpDebugRaw = saved;
+        // Diagnostic — one console.log so DevTools shows the raw stored value
+        // vs the value we chose to use. Kept inside try/catch so a stray
+        // ReferenceError can't take down the whole render.
+        console.log("[profile] localStorage[" + CONNECTED_ADDR_KEY + "] =", JSON.stringify(saved));
         if (saved && /^G[A-Z2-7]{55}$/.test(saved)) {
           cpState.wallet = { address: saved };
         } else {
           cpState.wallet = null;
         }
-      } catch (e) { cpState.wallet = null; }
-      // Temporary diagnostic — a single console.log so if something is off,
-      // we can inspect localStorage directly from DevTools.
-      console.log("[profile] localStorage[" + CONNECTED_ADDR_KEY + "] =", JSON.stringify(cpDebugRaw), "-> cpState.wallet =", cpState.wallet);
+      } catch (e) {
+        console.warn("[profile] wallet sync failed:", e);
+        cpState.wallet = null;
+      }
 
       // If the connected wallet already owns a profile, jump straight to the
       // manage view instead of showing the create form. Users rarely have
