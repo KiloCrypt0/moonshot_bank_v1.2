@@ -74,6 +74,13 @@
       ],
     });
 
+    // Expose the kit on window so the regular <script> block can reach it.
+    // Module-<script> imports are scoped to the module — a bare reference
+    // like `StellarWalletsKit.signMessage(...)` from the regular script
+    // throws ReferenceError. Aliasing to window makes it accessible as
+    // a bare identifier (global object props resolve as globals).
+    window.StellarWalletsKit = StellarWalletsKit;
+
     window.SWK_IDS = {
       freighter: FREIGHTER_ID,
       albedo: ALBEDO_ID,
