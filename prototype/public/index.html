@@ -4064,6 +4064,15 @@
     }
 
     window.addEventListener("load", async () => {
+      // Profile URL (/p/{slug}) — treat as a rich share view of that profile.
+      const profileMatch = location.pathname.match(/^\/p\/([a-z0-9-]{2,30})$/i);
+      if (profileMatch) {
+        const loaded = await loadProfileAsSharedView(profileMatch[1]);
+        if (loaded) return;
+        // If profile doesn't exist, fall through so at least the welcome
+        // screen renders instead of a blank page.
+      }
+
       // Shared portfolio link beats everything else.
       const importParams = new URLSearchParams(location.search);
       if (importParams.has("import")) {
@@ -4238,6 +4247,36 @@
       return true;
     }
 
+    // Load a profile from /p/{slug} into shared-view mode. Same as the
+    // ?import=<blob> flow, but data comes from the server-side profile record
+    // and the banner carries the profile's identity (avatar + name + bio) so
+    // visitors see whose portfolio they're browsing.
+    async function loadProfileAsSharedView(slug) {
+      try {
+        const r = await fetch(`${API_BASE}/api/v1/profiles/${encodeURIComponent(slug)}/portfolio`);
+        if (!r.ok) return false;
+        const data = await r.json();
+        if (!data.wallets || data.wallets.length === 0) return false;
+        sharedView = {
+          active: true,
+          name: data.profile.displayName,
+          avatar: data.profile.avatarEmoji,
+          bio: data.profile.bio,
+          profileSlug: data.profile.slug,
+          wallets: data.wallets.map((w) => ({ address: w.address, label: w.label })),
+        };
+        walletList = sharedView.wallets.map((w) => ({ address: w.address, label: w.label }));
+        activeView = "all";
+        currentAggTab = "tokens";
+        multiWalletMode = true;
+        await loadMultiWalletPortfolio();
+        return true;
+      } catch (e) {
+        console.warn("loadProfileAsSharedView failed:", e);
+        return false;
+      }
+    }
+
     async function saveSharedWallets() {
       if (!sharedView.active) return;
       const toAdd = sharedView.wallets.slice();
@@ -4256,6 +4295,12 @@
 
     function dismissSharedView() {
       sharedView = { active: false, name: null, wallets: null };
+      // If we're on a /p/{slug} URL, navigate away first — otherwise the
+      // reload just re-enters the same profile view on next load.
+      if (/^\/p\//.test(location.pathname)) {
+        location.href = "/";
+        return;
+      }
       history.replaceState(null, "", location.pathname);
       location.reload();
     }
@@ -4392,11 +4437,14 @@
       const d = portfolioData;
       if (!d) return;
 
-      // Wallet panel
+      // Wallet panel — banner text is richer for profile views (name + avatar
+      // + optional bio) than plain share-URL views.
       const sharedBannerHTML = sharedView.active ? `
         <div class="share-banner">
           <div class="share-banner-text">
-            Viewing <strong>${escapeShareHtml(sharedView.name || "Shared portfolio")}</strong> &middot; ${d.walletCount} wallet${d.walletCount !== 1 ? "s" : ""} &middot; read-only
+            ${sharedView.profileSlug
+              ? `<span style="font-size:20px;margin-right:6px">${escapeShareHtml(sharedView.avatar || "🚀")}</span>Viewing <strong>${escapeShareHtml(sharedView.name || "Profile")}</strong>${sharedView.bio ? ` &middot; <span style="color:var(--text-muted)">${escapeShareHtml(sharedView.bio)}</span>` : ""} &middot; ${d.walletCount} wallet${d.walletCount !== 1 ? "s" : ""} &middot; read-only`
+              : `Viewing <strong>${escapeShareHtml(sharedView.name || "Shared portfolio")}</strong> &middot; ${d.walletCount} wallet${d.walletCount !== 1 ? "s" : ""} &middot; read-only`}
           </div>
           <div class="share-banner-actions">
             <button class="share-btn" onclick="saveSharedWallets()">Save to my portfolio</button>

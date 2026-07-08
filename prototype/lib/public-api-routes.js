@@ -6,6 +6,7 @@
  * middleware here (double-count avoidance).
  */
 const express = require("express");
+const path = require("path");
 const profiles = require("./public-profiles");
 const historyDb = require("./history-db");
 const profileAuth = require("./profile-auth");
@@ -267,92 +268,14 @@ function createRouter(fetchPortfolioFn) {
   // PUBLIC PROFILE PAGE — /p/:slug
   // ══════════════════════════════════════════════════════════════════════════
 
-  router.get("/p/:slug", (req, res) => {
-    const profile = profiles.getProfile(req.params.slug);
-    if (!profile) {
-      return res.status(404).send(`<html><head><title>Not Found</title>
-<style>body{font-family:sans-serif;background:#0a0e17;color:#e2e8f0;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
-.c{text-align:center}h1{font-size:48px;margin:0}p{color:#94a3b8;margin-top:12px}a{color:#6366f1}</style></head>
-<body><div class="c"><h1>404</h1><p>Profile not found</p><a href="/">Go home</a></div></body></html>`);
-    }
-
-    res.send(`<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>${htmlEscape(profile.displayName)} — Stellar Scope</title>
-<meta name="description" content="${htmlEscape(profile.bio || profile.displayName + "'s Stellar portfolio")}">
-<meta property="og:title" content="${htmlEscape(profile.displayName)} — Stellar Scope">
-<style>
-:root{--bg:#0a0e17;--card:#1a2332;--border:#2a3a4e;--text:#e2e8f0;--muted:#94a3b8;--accent:#6366f1;--green:#22c55e;--red:#ef4444}
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
-.header{background:#111827;border-bottom:1px solid var(--border);padding:16px 32px;display:flex;align-items:center;justify-content:space-between}
-.logo{font-size:18px;font-weight:700;color:var(--text);text-decoration:none}
-.badge{font-size:11px;padding:3px 10px;border-radius:6px;background:rgba(99,102,241,0.15);color:var(--accent);font-weight:600}
-.hero{text-align:center;padding:48px 24px 32px}
-.avatar{font-size:48px;margin-bottom:12px}
-.name{font-size:28px;font-weight:700;margin-bottom:8px}
-.bio{color:var(--muted);font-size:15px;max-width:500px;margin:0 auto}
-.total{font-size:36px;font-weight:700;margin:24px 0 8px;color:var(--green)}
-.wcount{color:var(--muted);font-size:13px}
-.content{max-width:800px;margin:0 auto;padding:0 24px 48px}
-.wcard{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:16px}
-.wheader{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
-.wlabel{font-weight:600;font-size:15px}
-.waddr{font-family:monospace;font-size:12px;color:var(--muted)}
-.wval{font-size:20px;font-weight:600}
-.trow{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-top:1px solid var(--border)}
-.tname{font-weight:500;font-size:14px}
-.tbal{font-size:13px;color:var(--muted)}
-.tval{text-align:right;font-size:14px}
-.loading{text-align:center;padding:60px;color:var(--muted)}
-.spinner{width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 16px}
-@keyframes spin{to{transform:rotate(360deg)}}
-</style></head><body>
-<div class="header"><a class="logo" href="/">Stellar Scope</a><span class="badge">Public Portfolio</span></div>
-<div class="hero">
-  <div class="avatar">${htmlEscape(profile.avatarEmoji)}</div>
-  <div class="name">${htmlEscape(profile.displayName)}</div>
-  ${profile.bio ? `<div class="bio">${htmlEscape(profile.bio)}</div>` : ""}
-  <div id="tv" class="total" style="display:none"></div>
-  <div class="wcount">${profile.wallets.length} wallet${profile.wallets.length !== 1 ? "s" : ""}</div>
-</div>
-<div class="content" id="content"><div class="loading"><div class="spinner"></div>Loading portfolio...</div></div>
-<script>
-function esc(s){if(s==null)return"";return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;")}
-function fmt(n,d=2){if(n==null)return"—";return new Intl.NumberFormat("en-US",{minimumFractionDigits:d,maximumFractionDigits:d}).format(n)}
-function fmtUSD(n){return n==null?"—":"$"+fmt(n)}
-function short(a){return a?a.slice(0,6)+"..."+a.slice(-4):""}
-async function load(){
-  try{
-    const r=await fetch("/api/v1/profiles/${encodeURIComponent(profile.slug)}/portfolio");
-    const d=await r.json();render(d);
-  }catch(e){document.getElementById("content").innerHTML='<div class="loading">Failed to load</div>'}}
-function render(d){
-  if(${profile.showBalances ? "true" : "false"}&&d.totalValueUSD!=null){const el=document.getElementById("tv");el.textContent=fmtUSD(d.totalValueUSD);el.style.display="block"}
-  let h="";
-  for(const w of d.wallets){
-    h+='<div class="wcard"><div class="wheader"><div>';
-    h+='<div class="wlabel">'+esc(w.label||"Wallet")+'</div>';
-    h+='<div class="waddr">'+esc(short(w.address))+'</div></div>';
-    if(${profile.showBalances ? "true" : "false"}&&w.totalValueUSD!=null)h+='<div class="wval">'+fmtUSD(w.totalValueUSD)+'</div>';
-    h+='</div>';
-    if(${profile.showBalances ? "true" : "false"}&&w.balances){
-      for(const t of w.balances.filter(b=>b.type!=="lp_share")){
-        h+='<div class="trow"><div><div class="tname">'+esc(t.asset?.code||"XLM")+'</div>';
-        h+='<div class="tbal">'+fmt(parseFloat(t.balance),4)+'</div></div>';
-        h+='<div class="tval">'+(t.valueUSD>0?fmtUSD(t.valueUSD):"—")+'</div></div>';
-      }}
-    if(${profile.showDefi ? "true" : "false"}&&w.defiPositions?.length>0){
-      for(const p of w.defiPositions){
-        h+='<div class="trow"><div><div class="tname" style="color:var(--accent)">'+esc((p.protocol||"DeFi").toUpperCase())+'</div>';
-        h+='<div class="tbal">'+esc(p.type||"")+" — "+esc(p.asset||"")+'</div></div>';
-        if(p.underlyingAmount)h+='<div class="tval">'+fmt(p.underlyingAmount,4)+'</div>';
-        h+='</div>';
-      }}
-    h+='</div>'}
-  document.getElementById("content").innerHTML=h||'<div class="loading">No wallets</div>'}
-load();
-</script></body></html>`);
+  router.get("/p/:slug", (_req, res) => {
+    // Serve the main SPA — the client-side JS detects the /p/{slug} path,
+    // fetches the profile via /api/v1/profiles/:slug/portfolio, and puts
+    // the SPA into shared-view mode so the visitor gets the full main-app
+    // experience (all tabs, DeFi, NFTs, history) scoped to the profile's
+    // wallets, with an identity banner. Previous handler served a bare
+    // custom HTML that was strictly less useful.
+    res.sendFile(path.join(__dirname, "..", "public", "index.html"));
   });
 
   // ══════════════════════════════════════════════════════════════════════════
