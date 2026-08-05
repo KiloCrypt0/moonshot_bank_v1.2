@@ -46,29 +46,19 @@ const TOKENS = {
   PYUSD: { code: "PYUSD", contractId: "CCCRWH6Q3FNP3I2I57BDLM5AFAT7O6OF6GKQOC6SSJNDAVRZ57SPHGU2", decimals: 7 },
 };
 
-// Known LP pool catalog. Add new pools here as users provide liquidity.
+// Known LP pool catalog — MANUAL FALLBACK for pools not covered by
+// lib/adapters/lp-discovery.js (which auto-discovers Aquarius via HTTP API
+// and Soroswap via factory enumeration). Add entries here only for
+// protocols that lp-discovery doesn't cover yet — e.g. Phoenix AMM, or
+// pools on protocols too new for us to have written a discovery path.
+// Aquarius + Soroswap pools should NOT be added here; they'd duplicate
+// what discovery already surfaces.
+//
 // pattern:
 //   "soroswap" — pool contract IS the LP share token, total via total_supply
 //   "aquarius" — separate share token via share_id(), total via get_total_shares
 //   "sushiswap-v3" — NFT-based, just detect ownership
-const KNOWN_POOLS = [
-  {
-    protocol: "soroswap",
-    pattern: "soroswap",
-    name: "Soroswap XLM/USDC",
-    poolContractId: "CAM7DY53G63XA4AJRS24Z6VFYAFSSF76C3RZ45BE5YU3FQS5255OOABP",
-    shareTokenContractId: "CAM7DY53G63XA4AJRS24Z6VFYAFSSF76C3RZ45BE5YU3FQS5255OOABP",
-    tokens: [TOKENS.XLM, TOKENS.USDC],
-  },
-  {
-    protocol: "aquarius",
-    pattern: "aquarius",
-    name: "Aquarius USDY/USDC",
-    poolContractId: "CAFHLHGZXOVNCGFJ7DOXL7JDNMBCEZKDI3LS5NRQH3GXC7CSIMQZHUSM",
-    shareTokenContractId: "CCYD4C2WFWIIDF235SCDXEWL5RT6S53WQWLDHUTQ5USZ5VNF5NHJGVW7",
-    tokens: [TOKENS.USDY, TOKENS.USDC],
-  },
-];
+const KNOWN_POOLS = [];
 
 // SushiSwap V3 Positions NFT registry. Each user-held NFT is one
 // concentrated-liquidity position.

@@ -17,6 +17,7 @@ const AquariusAdapter = require("./lib/adapters/aquarius");
 const TemplarAdapter = require("./lib/adapters/templar");
 const UpshiftAdapter = require("./lib/adapters/upshift");
 const LPPositionsAdapter = require("./lib/adapters/lp-positions");
+const LPDiscoveryAdapter = require("./lib/adapters/lp-discovery");
 const snapshotScheduler = require("./lib/snapshot-scheduler");
 const rwaYieldFetcher = require("./lib/rwa-yield-fetcher");
 const createPublicApiRoutes = require("./lib/public-api-routes");
@@ -72,7 +73,11 @@ function getHorizon() {
 
 const horizon = getHorizon();
 
-// Protocol adapter registry — add new adapters here
+// Protocol adapter registry — add new adapters here.
+// LPDiscoveryAdapter auto-discovers positions in Aquarius (HTTP API),
+// Soroswap (factory enumeration), and SushiSwap V3 (detect-and-link).
+// LPPositionsAdapter with hardcoded pools stays as a fallback for any
+// pool the discovery adapter misses (e.g. nascent protocols).
 const PROTOCOL_ADAPTERS = [
   BlendAdapter,
   AquariusAdapter,
@@ -80,6 +85,7 @@ const PROTOCOL_ADAPTERS = [
   SushiSwapV3Adapter,
   SolvProtocolAdapter,
   UpshiftAdapter,
+  LPDiscoveryAdapter,
   LPPositionsAdapter,
 ];
 
