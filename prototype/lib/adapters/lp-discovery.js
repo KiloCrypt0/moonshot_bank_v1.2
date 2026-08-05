@@ -89,13 +89,23 @@ async function _getMeta(contractId) {
   return meta;
 }
 
+// Stellar's native XLM asset shows up as "native" both in Aquarius's HTTP
+// API (via tokens_str) and in Soroban SAC metadata (symbol() returns
+// "native"). Normalize to XLM so it renders like every other asset.
+function _normalizeSymbol(sym) {
+  if (!sym) return "?";
+  const s = String(sym).trim();
+  if (s.toLowerCase() === "native") return "XLM";
+  return s;
+}
+
 function _priceUSD(code, priceCtx) {
   if (!code) return 0;
-  const c = code.toUpperCase();
+  const c = _normalizeSymbol(code).toUpperCase();
   // Stablecoins we treat as $1. USDY drifts up over time, but treating
   // it as $1 is close enough for LP valuation.
   if (["USDC","USDY","PYUSD","USDX","EURC","MGUSD","USST","YLDS","USTBL"].includes(c)) return 1;
-  if (c === "XLM" || c === "NATIVE") return priceCtx?.xlmPrice?.usd || 0;
+  if (c === "XLM") return priceCtx?.xlmPrice?.usd || 0;
   return 0;
 }
 
@@ -120,7 +130,7 @@ async function discoverAquariusPositions(userAddress, priceCtx) {
   // Both fields are floats, high-precision — we just parse and format.
   return rows.map(row => {
     const tokensStr = row.tokens_str || [];  // "USDY:G...", "USDC:G..."
-    const codes = tokensStr.map(t => (t.split(":")[0] || "").trim() || "?");
+    const codes = tokensStr.map(t => _normalizeSymbol((t.split(":")[0] || "").trim() || "?"));
     const deposited = row.deposited_tokens || {};
     const amounts = [];
     let valueUSD = 0;
@@ -217,13 +227,15 @@ async function discoverSoroswapPositions(userAddress, priceCtx) {
         t0Addr ? _getMeta(t0Addr.toString()) : Promise.resolve({ symbol: "?", decimals: 7 }),
         t1Addr ? _getMeta(t1Addr.toString()) : Promise.resolve({ symbol: "?", decimals: 7 }),
       ]);
+      const sym0 = _normalizeSymbol(m0.symbol);
+      const sym1 = _normalizeSymbol(m1.symbol);
 
       const userAmt0 = Number(reserveArr[0] || 0) * share;
       const userAmt1 = Number(reserveArr[1] || 0) * share;
       const amount0 = userAmt0 / (10 ** m0.decimals);
       const amount1 = userAmt1 / (10 ** m1.decimals);
-      const valueUSD = amount0 * _priceUSD(m0.symbol, priceCtx)
-                     + amount1 * _priceUSD(m1.symbol, priceCtx);
+      const valueUSD = amount0 * _priceUSD(sym0, priceCtx)
+                     + amount1 * _priceUSD(sym1, priceCtx);
 
       return {
         protocol: "soroswap",
@@ -231,11 +243,11 @@ async function discoverSoroswapPositions(userAddress, priceCtx) {
         subtype: "constant_product",
         poolContractId: pair,
         tokens: [
-          { symbol: m0.symbol, contractId: t0Addr?.toString() || null, decimals: m0.decimals },
-          { symbol: m1.symbol, contractId: t1Addr?.toString() || null, decimals: m1.decimals },
+          { symbol: sym0, contractId: t0Addr?.toString() || null, decimals: m0.decimals },
+          { symbol: sym1, contractId: t1Addr?.toString() || null, decimals: m1.decimals },
         ],
-        token0: { symbol: m0.symbol },
-        token1: { symbol: m1.symbol },
+        token0: { symbol: sym0 },
+        token1: { symbol: sym1 },
         amounts: {
           token0: amount0.toFixed(6).replace(/\.?0+$/, ""),
           token1: amount1.toFixed(6).replace(/\.?0+$/, ""),
