@@ -18,6 +18,7 @@ const TemplarAdapter = require("./lib/adapters/templar");
 const UpshiftAdapter = require("./lib/adapters/upshift");
 const LPPositionsAdapter = require("./lib/adapters/lp-positions");
 const LPDiscoveryAdapter = require("./lib/adapters/lp-discovery");
+const SentoraAdapter = require("./lib/adapters/sentora");
 const snapshotScheduler = require("./lib/snapshot-scheduler");
 const rwaYieldFetcher = require("./lib/rwa-yield-fetcher");
 const createPublicApiRoutes = require("./lib/public-api-routes");
@@ -85,6 +86,7 @@ const PROTOCOL_ADAPTERS = [
   SushiSwapV3Adapter,
   SolvProtocolAdapter,
   UpshiftAdapter,
+  SentoraAdapter,
   LPDiscoveryAdapter,
   LPPositionsAdapter,
 ];
