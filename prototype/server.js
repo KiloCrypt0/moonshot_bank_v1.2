@@ -21,6 +21,7 @@ const LPDiscoveryAdapter = require("./lib/adapters/lp-discovery");
 const SentoraAdapter = require("./lib/adapters/sentora");
 const snapshotScheduler = require("./lib/snapshot-scheduler");
 const rwaYieldFetcher = require("./lib/rwa-yield-fetcher");
+const defiExplorer = require("./lib/defi-explorer");
 const createPublicApiRoutes = require("./lib/public-api-routes");
 const { resolveNfts } = require("./lib/nft-resolver");
 const { resolveSorobanCollectibles } = require("./lib/collectibles-resolver");
@@ -941,6 +942,15 @@ async function fetchClassicMarketCap(code, issuer, xlmPrice) {
   }
 }
 
+// ── DeFi Explorer (top-level DeFi tab: protocol & pool directory) ──────────
+// Serves the background-refreshed cache instantly; never fetches on the
+// request path. First boot may return protocols with loading:true until the
+// initial refresh cycle completes (~2 min; Soroswap is the long pole).
+app.get("/api/v1/defi-explorer", (_req, res) => {
+  res.set("Cache-Control", "public, max-age=60");
+  res.json(defiExplorer.getSnapshot());
+});
+
 app.get("/api/v1/rwa-stats", async (req, res) => {
   // Match the server-side TTL so downstream callers can cache too.
   res.set("Cache-Control", `public, max-age=${RWA_STATS_TTL / 1000}`);
@@ -1749,6 +1759,9 @@ app.listen(PORT, () => {
 
   // Start hourly RWA yield refresh (Centrifuge today; more issuers to come)
   rwaYieldFetcher.start();
+
+  // Start DeFi Explorer background refresh (protocol & pool directory)
+  defiExplorer.start();
 
   // Run daily downsampling at startup (and it could be scheduled via cron too)
   setTimeout(() => {
