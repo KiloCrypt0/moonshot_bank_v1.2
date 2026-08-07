@@ -2900,6 +2900,24 @@
     }
 
     // ── Top-level page nav (Portfolio / RWAs) ─────────────────
+    // Returns true if the user has any wallet we can render a portfolio for —
+    // either an entry in the browser-local walletList or an address that the
+    // header shows as "connected." Used to decide whether the Portfolio tab
+    // should jump straight into the portfolio view or bounce to the welcome-
+    // with-connect-buttons screen.
+    function hasAnyTrackedWallet() {
+      try {
+        const raw = localStorage.getItem("stellarscope.walletList");
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) return true;
+        }
+        const connected = localStorage.getItem(CONNECTED_ADDR_KEY);
+        if (connected && /^G[A-Z2-7]{55}$/.test(connected)) return true;
+      } catch (e) { /* ignore */ }
+      return false;
+    }
+
     async function switchPage(page) {
       if (!["portfolio", "rwas", "profile"].includes(page)) page = "portfolio";
       currentPage = page;
@@ -2920,12 +2938,18 @@
       } else if (page === "profile") {
         await renderCreateProfilePage();
       } else {
-        // Restore the welcome screen / portfolio view
-        const app = document.getElementById("app");
-        app.innerHTML = WELCOME_HTML;
-        // Re-trigger leaderboard load since DOM was replaced
-        loadWhales();
-        loadPortfolioWhales();
+        // Portfolio tab: if the user already has a wallet connected/tracked,
+        // jump straight into the portfolio view. Otherwise show the welcome-
+        // with-connect-buttons screen so they can add one.
+        if (hasAnyTrackedWallet() && typeof enterPortfolioMode === "function") {
+          await enterPortfolioMode();
+        } else {
+          const app = document.getElementById("app");
+          app.innerHTML = WELCOME_HTML;
+          // Re-trigger leaderboard load since DOM was replaced
+          loadWhales();
+          loadPortfolioWhales();
+        }
       }
     }
 
