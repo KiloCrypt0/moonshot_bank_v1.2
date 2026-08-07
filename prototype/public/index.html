@@ -3786,11 +3786,16 @@
             const kindBadge = isSoroban
               ? `<span class="rwa-asset-kind-badge">Soroban</span>`
               : `<span class="rwa-asset-kind-badge">Classic</span>`;
+            // Both yield windows come from the same fetcher cycle for a given
+            // asset, so they always share the same asOf. Mirror the timestamp
+            // under both cells so the update date is visually tied to both
+            // figures, not just the 7d.
+            const asOfSuffix = renderAsOf(a.statsAsOf, a.statsSource);
             const yieldHtml = a.yield7d
-              ? `<div class="rwa-asset-yield-cell"><div class="rwa-asset-yield">${escapeHtml(a.yield7d)}</div>${renderAsOf(a.statsAsOf, a.statsSource)}</div>`
+              ? `<div class="rwa-asset-yield-cell"><div class="rwa-asset-yield">${escapeHtml(a.yield7d)}</div>${asOfSuffix}</div>`
               : `<div class="rwa-asset-yield-cell"><div class="rwa-asset-yield empty">—</div></div>`;
             const yield30Html = a.yield30d
-              ? `<div class="rwa-asset-yield-cell"><div class="rwa-asset-yield">${escapeHtml(a.yield30d)}</div></div>`
+              ? `<div class="rwa-asset-yield-cell"><div class="rwa-asset-yield">${escapeHtml(a.yield30d)}</div>${a.yield7d ? asOfSuffix : ""}</div>`
               : `<div class="rwa-asset-yield-cell"><div class="rwa-asset-yield empty">—</div></div>`;
             const href = `#/rwa/${rwaSlug(a)}`;
             // Concatenate everything a user might type in the search box so the
@@ -3893,8 +3898,11 @@
       const sourceLinkHtml = a.statsSourceUrl
         ? `<a class="rwa-stat-sourcelink" href="${escapeHtml(a.statsSourceUrl)}" target="_blank" rel="noopener" title="${escapeHtml(a.statsSource || 'Source')}">* Reference →</a>`
         : "";
+      // Timestamp isn't shown INSIDE either yield card — a single shared
+      // "as of X · source: Y" line is rendered below the stats grid and
+      // applies to both windows (they come from the same fetcher cycle).
       const yieldStatHtml = a.yield7d
-        ? `<div class="rwa-stat-value yield">${escapeHtml(a.yield7d)}</div>${renderAsOf(a.statsAsOf, a.statsSource)}${sourceLinkHtml}`
+        ? `<div class="rwa-stat-value yield">${escapeHtml(a.yield7d)}</div>${sourceLinkHtml}`
         : `<div class="rwa-stat-value muted">—</div>`;
       const yield30StatHtml = a.yield30d
         ? `<div class="rwa-stat-value yield">${escapeHtml(a.yield30d)}</div>`
