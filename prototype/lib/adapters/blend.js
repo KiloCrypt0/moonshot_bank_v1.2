@@ -35,7 +35,14 @@ const { priceSorobanToken } = require("../pricing-engine");
 // ─────────────────────────────────────────────────────────────────────────────
 
 const BLEND_V2_RATE_SCALAR_DECIMALS = 12;
-const BLEND_IR_MOD_SCALAR = 1e9;
+// Blend V2 stores ir_mod as 7-decimal fixed point (like r_base/r_one/etc),
+// NOT 9-decimal as V1 did. On-chain evidence (Fixed Pool V2 USDC reserve,
+// Aug 2026): raw ir_mod = 15_800_818. Read as 9-dec → 0.0158, which violates
+// the whitepaper's ir_mod clamp of [0.1, 100]; read as 7-dec → 1.58, valid,
+// and reproduces borrow/supply rates consistent with Blend's own dashboard
+// (~11% borrow at 78% utilization vs the ~0.11% the 9-dec reading yields).
+// The 1e9 value here previously understated every Blend APY by ~100×.
+const BLEND_IR_MOD_SCALAR = 1e7;
 const SCALAR_7 = 1e7;
 
 const BLEND_POOL_FACTORY = process.env.BLEND_POOL_FACTORY ||
@@ -504,11 +511,82 @@ function isConfigured() {
   return getConfiguredPools().length > 0;
 }
 
+/**
+ * Pool-level overview for the DeFi Explorer tab (no user address involved).
+ * For each configured pool: per-reserve totals (supplied/borrowed USD via
+ * b_supply×b_rate / d_supply×d_rate) and current supply/borrow APY from the
+ * same kinked-interest-rate math the positions path uses.
+ *
+ * Additive export — does not touch the getPositions() user path.
+ */
+async function getPoolsOverview() {
+  const pools = getConfiguredPools();
+  const out = [];
+  for (const pool of pools) {
+    try {
+      const [reserveList, poolConfig] = await Promise.all([
+        getReserveList(pool.contractId),
+        getPoolConfig(pool.contractId),
+      ]);
+      if (!Array.isArray(reserveList) || reserveList.length === 0) continue;
+      const backstopTakeRate = fromScalar7(
+        poolConfig?.bstop_rate ?? poolConfig?.backstopRate ?? poolConfig?.bstopRate ?? 0
+      );
+
+      const reserves = [];
+      for (const assetAddress of reserveList) {
+        try {
+          const reserveData = await getReserve(pool.contractId, assetAddress);
+          if (!reserveData) continue;
+          const inner = reserveData?.data || reserveData || {};
+          const bRate = inner.b_rate ?? inner.bRate;
+          const dRate = inner.d_rate ?? inner.dRate;
+          const bSupply = BigInt(inner.b_supply ?? inner.bSupply ?? 0);
+          const dSupply = BigInt(inner.d_supply ?? inner.dSupply ?? 0);
+
+          const { symbol, decimals } = await _resolveAssetMetadata(assetAddress);
+          const suppliedUnderlying = protocolToUnderlying(bSupply, bRate, decimals);
+          const borrowedUnderlying = protocolToUnderlying(dSupply, dRate, decimals);
+
+          let priceUsd = 0;
+          try {
+            const price = await priceSorobanToken(assetAddress, { decimals });
+            priceUsd = price?.usd || 0;
+          } catch (_) {}
+
+          const rateParams = _extractReserveRateParams(reserveData);
+          const utilization = _computeUtilization(reserveData);
+          const borrowApr = computeBorrowApr({ ...rateParams, utilization });
+          const supplyApr = computeSupplyApr({ borrowApr, utilization, backstopTakeRate });
+
+          reserves.push({
+            assetAddress,
+            symbol,
+            decimals,
+            suppliedUSD: suppliedUnderlying * priceUsd,
+            borrowedUSD: borrowedUnderlying * priceUsd,
+            supplyApy: aprToApy(supplyApr),
+            borrowApy: aprToApy(borrowApr),
+            utilization,
+          });
+        } catch (e) {
+          console.warn(`[Blend] overview reserve failed ${assetAddress.slice(0, 10)}: ${e.message?.slice(0, 80)}`);
+        }
+      }
+      out.push({ name: pool.name, contractId: pool.contractId, reserves });
+    } catch (e) {
+      console.warn(`[Blend] overview pool failed ${pool.contractId.slice(0, 10)}: ${e.message?.slice(0, 80)}`);
+    }
+  }
+  return out;
+}
+
 const BlendAdapter = {
   name: "Blend Protocol",
   protocol: "blend",
   isConfigured,
   getPositions,
+  getPoolsOverview,
 };
 
 module.exports = BlendAdapter;
