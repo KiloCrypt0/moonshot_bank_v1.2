@@ -2437,6 +2437,156 @@
       font-size: 13px;
     }
 
+    /* ── DeFi Explorer tab ─────────────────────────────────────── */
+    .defi-howto { margin: 12px 0 20px; }
+    .defi-howto summary {
+      cursor: pointer;
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 600;
+      user-select: none;
+    }
+    .defi-howto-body {
+      margin-top: 10px;
+      padding: 14px 16px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.55;
+    }
+    .defi-howto-body p { margin: 0 0 8px; }
+    .defi-howto-body p:last-child { margin-bottom: 0; }
+
+    .defi-cat-pill {
+      display: inline-block;
+      margin-left: 8px;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+      vertical-align: middle;
+    }
+    .defi-cat-pill.lending { background: rgba(99,102,241,0.15); color: #818cf8; }
+    .defi-cat-pill.amm     { background: rgba(16,185,129,0.15); color: var(--green); }
+    .defi-cat-pill.vault   { background: rgba(245,158,11,0.15); color: #fbbf24; }
+
+    .defi-protocol-tvl {
+      text-align: right;
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+    .defi-tvl-sub {
+      display: block;
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .defi-protocol-link {
+      display: inline-block;
+      margin-left: 8px;
+      color: var(--accent);
+      font-size: 12px;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .defi-protocol-link:hover { text-decoration: underline; }
+
+    .defi-pools { padding: 4px 0 8px; }
+    .defi-pools-label {
+      padding: 6px 20px 4px;
+      font-size: 11px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .defi-pool-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      padding: 12px 20px;
+      border-top: 1px solid var(--border);
+    }
+    .defi-pool-main { min-width: 0; }
+    .defi-pool-name { font-weight: 600; font-size: 14px; color: var(--text-primary); }
+    .defi-pool-note { font-size: 12px; color: var(--text-muted); margin-top: 2px; line-height: 1.4; }
+    .defi-pool-stats { display: flex; gap: 24px; flex-shrink: 0; }
+    .defi-pool-stat { text-align: right; min-width: 78px; }
+    .defi-pool-stat-val { font-size: 15px; font-weight: 700; color: var(--text-primary); white-space: nowrap; }
+    .defi-pool-stat-label {
+      font-size: 10px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      cursor: help;
+    }
+    .defi-reward-apy {
+      display: inline-block;
+      background: rgba(16,185,129,0.15);
+      color: var(--green);
+      padding: 1px 6px;
+      border-radius: 8px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .defi-apy-empty { color: var(--text-muted); }
+    .defi-apy-note {
+      padding: 8px 20px 4px;
+      font-size: 11px;
+      font-style: italic;
+      color: var(--text-muted);
+    }
+
+    .defi-reserve-table {
+      margin: 0 20px 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      font-size: 12px;
+    }
+    .defi-reserve-head, .defi-reserve-row {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr 1fr 1fr 1fr;
+      gap: 8px;
+      padding: 7px 12px;
+    }
+    .defi-reserve-head {
+      background: var(--bg-secondary);
+      color: var(--text-muted);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .defi-reserve-head span[title] { cursor: help; }
+    .defi-reserve-row { border-top: 1px solid var(--border); color: var(--text-secondary); }
+    .defi-reserve-row span:first-child { font-weight: 600; color: var(--text-primary); }
+    .defi-apy-supply { color: var(--green); font-weight: 600; }
+    .defi-apy-borrow { color: #fbbf24; font-weight: 600; }
+
+    .defi-footer-note {
+      margin-top: 24px;
+      padding: 12px 4px;
+      font-size: 11px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    @media (max-width: 720px) {
+      .defi-pool-row { flex-direction: column; align-items: flex-start; gap: 8px; }
+      .defi-pool-stats { width: 100%; justify-content: flex-start; }
+      .defi-pool-stat { text-align: left; }
+      .defi-reserve-head, .defi-reserve-row { grid-template-columns: 1.2fr 1fr 1fr; }
+      .defi-reserve-head span:nth-child(2), .defi-reserve-row span:nth-child(2),
+      .defi-reserve-head span:nth-child(3), .defi-reserve-row span:nth-child(3) { display: none; }
+    }
+
     @media (max-width: 720px) {
       .rwa-asset-row {
         grid-template-columns: 1fr;
@@ -2924,6 +3074,7 @@
   <!-- Top-level page nav. Hash routing keeps this purely client-side. -->
   <nav class="page-nav" id="pageNav">
     <button class="page-nav-tab active" data-page="portfolio" onclick="switchPage('portfolio')">Portfolio</button>
+    <button class="page-nav-tab" data-page="defi" onclick="switchPage('defi')">DeFi</button>
     <button class="page-nav-tab" data-page="rwas" onclick="switchPage('rwas')">RWAs</button>
     <button class="page-nav-tab" data-page="profile" onclick="switchPage('profile')">Profile</button>
   </nav>
@@ -3058,7 +3209,7 @@
     }
 
     async function switchPage(page) {
-      if (!["portfolio", "rwas", "profile"].includes(page)) page = "portfolio";
+      if (!["portfolio", "rwas", "defi", "profile"].includes(page)) page = "portfolio";
       currentPage = page;
 
       // Update tab styles
@@ -3067,13 +3218,15 @@
       });
 
       // Update URL hash without scrolling
-      const newHash = page === "rwas" ? "#/rwas" : page === "profile" ? "#/profile" : "";
+      const newHash = page === "rwas" ? "#/rwas" : page === "defi" ? "#/defi" : page === "profile" ? "#/profile" : "";
       if (location.hash !== newHash) {
         history.replaceState(null, "", location.pathname + location.search + newHash);
       }
 
       if (page === "rwas") {
         await renderRwasPage();
+      } else if (page === "defi") {
+        await renderDefiPage();
       } else if (page === "profile") {
         await renderCreateProfilePage();
       } else {
@@ -3732,6 +3885,130 @@
       }
     };
 
+    // ── DeFi Explorer page (top-level "DeFi" tab) ──────────────────
+    // A protocol & pool directory: what DeFi exists on Stellar, how big each
+    // protocol is, and what its pools pay. Data from /api/v1/defi-explorer
+    // (server-side background-refreshed cache; instant responses).
+    let defiExplorerData = null;
+
+    function fmtTvl(n) {
+      if (n == null || !Number.isFinite(n)) return "—";
+      if (n >= 1e9) return "$" + (n / 1e9).toFixed(2) + "B";
+      if (n >= 1e6) return "$" + (n / 1e6).toFixed(2) + "M";
+      if (n >= 1e3) return "$" + (n / 1e3).toFixed(0) + "K";
+      return "$" + n.toFixed(0);
+    }
+
+    function fmtApy(frac) {
+      if (frac == null || !Number.isFinite(frac)) return `<span class="defi-apy-empty">—</span>`;
+      return (frac * 100).toFixed(2) + "%";
+    }
+
+    async function renderDefiPage() {
+      const app = document.getElementById("app");
+      app.innerHTML = `<div class="rwa-page"><div class="rwa-page-title">DeFi on Stellar</div><div class="rwa-page-subtitle">Loading protocols…</div></div>`;
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/defi-explorer`);
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        defiExplorerData = await res.json();
+      } catch (e) {
+        app.innerHTML = `<div class="rwa-page"><div class="rwa-page-title">DeFi on Stellar</div><div class="error-banner">Failed to load: ${escapeHtml(e.message)}</div></div>`;
+        return;
+      }
+
+      const d = defiExplorerData;
+      const protocols = d.protocols || [];
+      const loaded = protocols.filter((p) => !p.loading && p.totalTvlUSD != null);
+      const grandTvl = loaded.reduce((s, p) => s + (p.totalTvlUSD || 0), 0);
+      const thresholdLabel = fmtTvl(d.thresholdUSD);
+
+      let html = `
+        <div class="rwa-page">
+          <div class="rwa-page-title">DeFi on Stellar</div>
+          <div class="rwa-page-subtitle">${protocols.length} protocols · ${fmtTvl(grandTvl)} total value locked · showing pools over ${thresholdLabel} TVL</div>
+          <div class="defi-howto">
+            <details>
+              <summary>New to DeFi? Start here</summary>
+              <div class="defi-howto-body">
+                <p><b>TVL (total value locked)</b> is the USD value of assets deposited in a protocol — a rough measure of size and trust.</p>
+                <p><b>APY</b> is the estimated yearly return for depositors, compounding included. Rates float constantly with market activity. Some venues don't publish live rates on-chain — those show "—".</p>
+                <p><b>Lending</b> protocols let you earn interest on deposits or borrow against them. <b>AMMs</b> pay you a share of swap fees for providing a pair of tokens. <b>Vaults</b> take a single asset and run a strategy for you.</p>
+                <p>Nothing on this page is investment advice — every listed venue carries smart-contract, market, and depeg risk. Click through to each protocol to learn more.</p>
+              </div>
+            </details>
+          </div>
+      `;
+
+      for (const p of protocols) {
+        const catClass = p.category === "Lending" ? "lending" : p.category === "Yield Vaults" ? "vault" : "amm";
+        const tvlLabel = p.loading ? "loading…" : fmtTvl(p.totalTvlUSD);
+        const poolsLabel = p.poolsTotal != null
+          ? `${p.poolsShown} of ${p.poolsTotal} pool${p.poolsTotal !== 1 ? "s" : ""} over ${thresholdLabel}`
+          : "";
+        html += `
+          <div class="rwa-category defi-protocol">
+            <div class="rwa-category-header">
+              <div class="rwa-category-name">${escapeHtml(p.name)}
+                <span class="defi-cat-pill ${catClass}">${escapeHtml(p.category)}</span>
+              </div>
+              <div class="defi-protocol-tvl">${tvlLabel}<span class="defi-tvl-sub">TVL on Stellar</span></div>
+            </div>
+            <div class="rwa-category-desc">${escapeHtml(p.blurb || "")}
+              <a class="defi-protocol-link" href="${escapeHtml(p.url || "#")}" target="_blank" rel="noopener">Visit ${escapeHtml(p.name)} →</a>
+            </div>
+        `;
+
+        if (p.loading) {
+          html += `<div class="rwa-empty-category">First data refresh in progress — check back in a minute.</div>`;
+        } else if (p.error && (!p.pools || p.pools.length === 0)) {
+          html += `<div class="rwa-empty-category">Data temporarily unavailable (${escapeHtml(p.error)}).</div>`;
+        } else if (!p.pools || p.pools.length === 0) {
+          html += `<div class="rwa-empty-category">No pools over ${thresholdLabel} TVL right now.${p.id === "templar" ? " Stellar-side deposits are growing — markets will appear here as they cross the threshold." : ""}</div>`;
+        } else {
+          html += `<div class="defi-pools">`;
+          if (poolsLabel) html += `<div class="defi-pools-label">${poolsLabel}</div>`;
+          for (const pool of p.pools) {
+            const apyMain = pool.apy != null ? fmtApy(pool.apy) : (pool.reserves ? "" : fmtApy(null));
+            const rewardHtml = pool.rewardApy > 0
+              ? `<span class="defi-reward-apy" title="Extra rewards paid in the protocol's incentive token">+${(pool.rewardApy * 100).toFixed(2)}%</span>` : "";
+            html += `
+              <div class="defi-pool-row">
+                <div class="defi-pool-main">
+                  <div class="defi-pool-name">${escapeHtml(pool.name)}</div>
+                  <div class="defi-pool-note">${escapeHtml(pool.note || "")}</div>
+                </div>
+                <div class="defi-pool-stats">
+                  <div class="defi-pool-stat"><div class="defi-pool-stat-val">${fmtTvl(pool.tvlUSD)}</div><div class="defi-pool-stat-label">TVL</div></div>
+                  ${pool.reserves ? "" : `<div class="defi-pool-stat"><div class="defi-pool-stat-val">${apyMain} ${rewardHtml}</div><div class="defi-pool-stat-label" title="Estimated yearly return, compounding included">APY</div></div>`}
+                </div>
+              </div>
+            `;
+            // Lending pools: per-reserve subtable (supply/borrow APYs per asset)
+            if (pool.reserves && pool.reserves.length) {
+              html += `<div class="defi-reserve-table"><div class="defi-reserve-head"><span>Asset</span><span>Supplied</span><span>Borrowed</span><span title="What depositors earn">Supply APY</span><span title="What borrowers pay">Borrow APY</span></div>`;
+              for (const r of pool.reserves) {
+                if ((r.suppliedUSD || 0) < 1000 && (r.borrowedUSD || 0) < 1000) continue;
+                html += `<div class="defi-reserve-row"><span>${escapeHtml(r.symbol)}</span><span>${fmtTvl(r.suppliedUSD)}</span><span>${fmtTvl(r.borrowedUSD)}</span><span class="defi-apy-supply">${fmtApy(r.supplyApy)}</span><span class="defi-apy-borrow">${fmtApy(r.borrowApy)}</span></div>`;
+              }
+              html += `</div>`;
+            }
+          }
+          if (p.apyNote) html += `<div class="defi-apy-note">${escapeHtml(p.apyNote)}</div>`;
+          html += `</div>`;
+        }
+        html += `</div>`;
+      }
+
+      html += `
+          <div class="defi-footer-note">
+            TVL and APY figures refresh in the background (60s–15min depending on source) and are estimates, not guarantees.
+            Pool data comes from each protocol's public API or directly from Stellar contracts.
+          </div>
+        </div>
+      `;
+      app.innerHTML = html;
+    }
+
     async function renderRwasPage() {
       const app = document.getElementById("app");
       app.innerHTML = `<div class="rwa-page"><div class="rwa-page-title">Real-World Assets on Stellar</div><div class="rwa-page-subtitle">Loading catalog…</div></div>`;
@@ -4003,6 +4280,7 @@
     function pageFromHash() {
       const h = location.hash || "";
       if (h === "#/rwas") return { page: "rwas" };
+      if (h === "#/defi") return { page: "defi" };
       if (h === "#/profile") return { page: "profile" };
       const m = h.match(/^#\/rwa\/(.+)$/);
       if (m) return { page: "rwa-detail", slug: m[1] };
