@@ -2956,10 +2956,14 @@
 
     // Fetch live RWA stats (market cap from Horizon + curated yields).
     // Best-effort: on failure, return empty so the page still renders.
+    // Cache-bust with a param that rotates every 5 minutes — matches the
+    // server-side cache TTL. Prevents users from getting stuck on a stale
+    // response body after we ship a new field (like yield30d).
     async function ensureRwaStats() {
       if (rwaStats) return rwaStats;
       try {
-        const res = await fetch(`${API_BASE}/api/v1/rwa-stats`);
+        const bust = Math.floor(Date.now() / 300_000);
+        const res = await fetch(`${API_BASE}/api/v1/rwa-stats?v=${bust}`);
         if (!res.ok) throw new Error("HTTP " + res.status);
         rwaStats = await res.json();
       } catch (e) {

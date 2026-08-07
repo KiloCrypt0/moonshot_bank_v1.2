@@ -275,6 +275,7 @@ function createRouter(fetchPortfolioFn) {
     // experience (all tabs, DeFi, NFTs, history) scoped to the profile's
     // wallets, with an identity banner. Previous handler served a bare
     // custom HTML that was strictly less useful.
+    res.setHeader("Cache-Control", "no-cache, must-revalidate");
     res.sendFile(path.join(__dirname, "..", "public", "index.html"));
   });
 

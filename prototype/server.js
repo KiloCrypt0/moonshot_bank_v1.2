@@ -34,7 +34,16 @@ app.set("trust proxy", 1);
 app.use(cors());
 // Cap request body size so a rogue POST can't exhaust memory.
 app.use(express.json({ limit: "50kb" }));
-app.use(express.static(path.join(__dirname, "public")));
+// Static assets. HTML files are told not to cache so that after a deploy
+// (Railway push), users don't stay on an old bundle until they hard-refresh.
+// Everything else (images, css, static json, etc.) uses default caching.
+app.use(express.static(path.join(__dirname, "public"), {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith(".html")) {
+      res.setHeader("Cache-Control", "no-cache, must-revalidate");
+    }
+  },
+}));
 
 // Per-IP rate limit applied to the entire API surface. Public routes previously
 // used this only selectively; internal routes had no limit. Apply globally.
@@ -1587,6 +1596,7 @@ app.get("/api/health", (req, res) => {
 
 // Serve frontend
 app.get("/", (req, res) => {
+  res.setHeader("Cache-Control", "no-cache, must-revalidate");
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
