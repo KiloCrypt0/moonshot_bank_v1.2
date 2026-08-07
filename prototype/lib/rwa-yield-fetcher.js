@@ -305,7 +305,12 @@ async function fetchEtherfuse() {
       const data = await res.json();
       const bps = Number(data?.current_basis_points);
       if (Number.isFinite(bps)) {
-        entry.yield7d = `${(bps / 100).toFixed(2)}%`;
+        const pct = `${(bps / 100).toFixed(2)}%`;
+        entry.yield7d = pct;
+        // Etherfuse issues bonds with a set coupon rate; current_basis_points
+        // is that rate, not a rolling window. It's already stable within the
+        // bond term, so the 30-day figure is the same value.
+        entry.yield30d = pct;
         entry.source = "Etherfuse (current bond APY)";
       }
       entry.asOf = data?.current_time ? data.current_time.slice(0, 10) : todayISO();
@@ -347,11 +352,16 @@ async function fetchOndo() {
     if (!m) throw new Error("apy field not found in HTML");
     const pct = parseFloat(m[1]);
     if (!Number.isFinite(pct)) throw new Error("apy not numeric");
+    // Ondo's published APY is computed from 30-day NAV growth per their own
+    // formula (APY = e^((End_NAV - Start_NAV) / (30/365)) - 1). So the
+    // number is already effectively a 30-day figure; show it in both columns.
+    const yieldStr = `${pct.toFixed(2)}%`;
     return {
       "usdy-gajmpx": {
-        yield7d: `${pct.toFixed(2)}%`,
+        yield7d: yieldStr,
+        yield30d: yieldStr,
         asOf: todayISO(),
-        source: "Ondo USDY (live APY from ondo.finance)",
+        source: "Ondo USDY (live APY from ondo.finance; 30-day NAV growth)",
       },
     };
   } catch (e) {

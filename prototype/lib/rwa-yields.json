@@ -1,12 +1,13 @@
 {
-  "_note": "Manually curated yield + market cap values per RWA asset. Keyed by slug = lowercased {code}-{first6charsOfIssuerOrContract}. When updating: set the value, bump asOf to today's ISO date, and set source so the UI can credit it. null hides the value (UI renders '—'). Live market caps from Horizon are computed for classic Stellar assets at the server and override anything set here.",
+  "_note": "Manually curated yield + market cap values per RWA asset. Keyed by slug = lowercased {code}-{first6charsOfIssuerOrContract}. When updating: set the value, bump asOf to today's ISO date, and set source so the UI can credit it. null hides the value (UI renders '—'). Live market caps from Horizon are computed for classic Stellar assets at the server and override anything set here. Both yield7d and yield30d are supported; if the issuer publishes only one sustained rate, set them to the same value.",
   "_extensionPath": "To replace manual values with a scraper, add a fetcher in server.js that overwrites these at runtime before the response is returned. The frontend doesn't care where the data came from.",
   "stats": {
     "benji-gbhngl": {
       "yield7d": "3.49%",
+      "yield30d": "3.49%",
       "marketCap": "$822M",
       "asOf": "2026-06-18",
-      "source": "rwa.xyz"
+      "source": "rwa.xyz (fund APY — Franklin publishes a single sustained rate; same value in both columns)"
     },
     "usdy-gajmpx": {
       "yield7d": "3.55%",

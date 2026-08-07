@@ -857,8 +857,12 @@ let rwaStatsCache = { ts: 0, payload: null };
 
 // SOFR is published by the NY Fed once per business day, so caching for
 // 1 hour is plenty. Used to compute YLDS yield (SOFR - 35 bps per Figure).
+// getSofrRate() returns today's overnight SOFR; getSofr30Avg() returns the
+// 30-day compounded average (SOFR Averages Index) — a stable window-based
+// figure for our 30d yield column.
 const SOFR_TTL = 60 * 60_000;
 let sofrCache = { ts: 0, rate: null, asOf: null };
+let sofr30Cache = { ts: 0, rate: null, asOf: null };
 
 async function getSofrRate() {
   if (sofrCache.rate != null && Date.now() - sofrCache.ts < SOFR_TTL) {
@@ -876,6 +880,26 @@ async function getSofrRate() {
     console.warn("SOFR fetch failed:", e.message);
     return sofrCache.rate != null
       ? { rate: sofrCache.rate, asOf: sofrCache.asOf } // stale ok
+      : null;
+  }
+}
+
+async function getSofr30Avg() {
+  if (sofr30Cache.rate != null && Date.now() - sofr30Cache.ts < SOFR_TTL) {
+    return { rate: sofr30Cache.rate, asOf: sofr30Cache.asOf };
+  }
+  try {
+    const res = await fetch("https://markets.newyorkfed.org/api/rates/secured/sofrai/last/1.json");
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    const rec = (data?.refRates || [])[0];
+    if (!rec || typeof rec.average30day !== "number") throw new Error("no SOFR30 record");
+    sofr30Cache = { ts: Date.now(), rate: rec.average30day, asOf: rec.effectiveDate };
+    return { rate: rec.average30day, asOf: rec.effectiveDate };
+  } catch (e) {
+    console.warn("SOFR30 fetch failed:", e.message);
+    return sofr30Cache.rate != null
+      ? { rate: sofr30Cache.rate, asOf: sofr30Cache.asOf }
       : null;
   }
 }
@@ -935,6 +959,7 @@ app.get("/api/v1/rwa-stats", async (req, res) => {
         const slug = rwaSlugServer(a);
         const entry = {
           yield7d: null,
+          yield30d: null,
           marketCap: null,
           supplyTokens: null,
           asOf: null,
@@ -944,6 +969,7 @@ app.get("/api/v1/rwa-stats", async (req, res) => {
         const c = curated[slug];
         if (c) {
           entry.yield7d = c.yield7d || null;
+          entry.yield30d = c.yield30d || null;
           entry.marketCap = c.marketCap || null;
           entry.asOf = c.asOf || null;
           entry.source = c.source || null;
@@ -985,13 +1011,19 @@ app.get("/api/v1/rwa-stats", async (req, res) => {
         // Layer 3: per-asset live yield overrides.
         // YLDS pays SOFR - 35 bps (per ylds.com); rwa.xyz doesn't track it
         // because yield accrues via daily distributions, not token price.
+        // We use today's overnight SOFR for the 7d column and the NY Fed's
+        // 30-day-average SOFR (SOFR Averages Index) for the 30d column.
         if (a.code === "YLDS") {
-          const sofr = await getSofrRate();
+          const [sofr, sofr30] = await Promise.all([getSofrRate(), getSofr30Avg()]);
           if (sofr) {
             const yieldPct = sofr.rate - 0.35;
             entry.yield7d = `${yieldPct.toFixed(2)}%`;
             entry.asOf = sofr.asOf;
             entry.source = `NY Fed SOFR ${sofr.rate.toFixed(2)}% − 35 bps`;
+          }
+          if (sofr30) {
+            const yield30Pct = sofr30.rate - 0.35;
+            entry.yield30d = `${yield30Pct.toFixed(2)}%`;
           }
         }
         stats[slug] = entry;
