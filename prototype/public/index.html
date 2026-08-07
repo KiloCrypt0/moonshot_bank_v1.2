@@ -105,7 +105,11 @@
             <polyline points="22 4 12 14.01 9 11.01"></polyline>
           </svg>
           ${short}
+          <svg class="wallet-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px;margin-left:2px;opacity:0.7"><polyline points="6 9 12 15 18 9"></polyline></svg>
         `;
+        // Swap the onclick from connect-modal to open-account-menu now that
+        // there IS a connected account to manage.
+        header.onclick = (e) => { e.stopPropagation(); toggleWalletMenu(address); };
       }
 
       // Welcome-hero button (btn-secondary; just update the label).
@@ -115,6 +119,105 @@
         hero.textContent = `Connected · ${short}`;
       }
     }
+
+    // Revert the header button back to the "Connect Wallet" appearance.
+    // Called after the user disconnects.
+    function resetHeaderButton() {
+      const header = document.getElementById("headerWalletBtn");
+      if (header) {
+        header.classList.remove("connected");
+        header.title = "";
+        header.innerHTML = `
+          <svg class="wallet-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="6" width="20" height="12" rx="2"></rect>
+            <path d="M22 10H2"></path>
+            <path d="M6 14h.01"></path>
+          </svg>
+          Connect Wallet
+        `;
+        header.onclick = () => connectWalletViaModal();
+      }
+      const hero = document.getElementById("heroWalletBtn");
+      if (hero) {
+        hero.title = "Connect any supported Stellar wallet";
+        hero.textContent = "Connect Wallet";
+      }
+    }
+
+    // Popover menu shown when the (connected) header button is clicked.
+    // Actions: copy address, disconnect, switch (disconnect + immediately
+    // reopen the wallet-picker modal).
+    function toggleWalletMenu(address) {
+      const existing = document.getElementById("walletMenu");
+      if (existing) { existing.remove(); return; }
+
+      const header = document.getElementById("headerWalletBtn");
+      const rect = header?.getBoundingClientRect();
+      const menu = document.createElement("div");
+      menu.id = "walletMenu";
+      menu.style.position = "fixed";
+      menu.style.top = (rect ? rect.bottom + 6 : 60) + "px";
+      menu.style.right = (rect ? Math.max(8, window.innerWidth - rect.right) : 16) + "px";
+      menu.innerHTML = `
+        <div class="wm-addr" title="${address}">${address.slice(0, 8)}…${address.slice(-6)}</div>
+        <button class="wm-item" data-act="copy">Copy address</button>
+        <button class="wm-item" data-act="switch">Switch wallet…</button>
+        <button class="wm-item wm-danger" data-act="disconnect">Disconnect</button>
+      `;
+      document.body.appendChild(menu);
+      menu.addEventListener("click", async (e) => {
+        const btn = e.target.closest(".wm-item");
+        if (!btn) return;
+        const act = btn.getAttribute("data-act");
+        menu.remove();
+        if (act === "copy") {
+          try { await navigator.clipboard.writeText(address); } catch (_) {}
+        } else if (act === "disconnect") {
+          disconnectWallet();
+        } else if (act === "switch") {
+          disconnectWallet();
+          // Give the button state a tick to reset, then reopen the picker.
+          setTimeout(() => connectWalletViaModal(), 50);
+        }
+      });
+      // Close on any outside click / Esc.
+      setTimeout(() => {
+        function outside(e) {
+          if (!menu.contains(e.target)) {
+            menu.remove();
+            document.removeEventListener("click", outside);
+            document.removeEventListener("keydown", escHandler);
+          }
+        }
+        function escHandler(e) {
+          if (e.key === "Escape") {
+            menu.remove();
+            document.removeEventListener("click", outside);
+            document.removeEventListener("keydown", escHandler);
+          }
+        }
+        document.addEventListener("click", outside);
+        document.addEventListener("keydown", escHandler);
+      }, 0);
+    }
+
+    // Disconnect the currently-connected wallet: forget the address from
+    // localStorage, reset the header button state, and clear the kit's
+    // internal selected-wallet so a subsequent connect goes back through
+    // the picker. Portfolio wallet list is intentionally NOT touched — it's
+    // a separate concept (which addresses to display, not which wallet is
+    // signing).
+    window.disconnectWallet = function () {
+      try { localStorage.removeItem(CONNECTED_ADDR_KEY); } catch (_) {}
+      try {
+        // Some SWK versions expose disconnect(); older versions don't.
+        // Either way, we've cleared our own state.
+        if (typeof StellarWalletsKit.disconnect === "function") {
+          StellarWalletsKit.disconnect();
+        }
+      } catch (_) {}
+      resetHeaderButton();
+    };
 
     async function connectAndAdd(address, label) {
       if (typeof window.addWalletToPortfolio !== "function") {
@@ -457,6 +560,42 @@
       width: 18px;
       height: 18px;
     }
+
+    /* Popover menu shown when the connected wallet button is clicked.
+       Position is set inline (top/right) based on the button's location. */
+    #walletMenu {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+      padding: 6px;
+      min-width: 200px;
+      z-index: 100;
+    }
+    #walletMenu .wm-addr {
+      padding: 8px 12px 10px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 6px;
+    }
+    #walletMenu .wm-item {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: none;
+      border: none;
+      color: var(--text-primary);
+      padding: 8px 12px;
+      font-size: 13px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    #walletMenu .wm-item:hover { background: var(--bg-hover); }
+    #walletMenu .wm-item.wm-danger { color: var(--red); }
+    #walletMenu .wm-item.wm-danger:hover { background: rgba(239, 68, 68, 0.1); }
 
     .wallet-picker {
       margin: 0 auto 32px;
