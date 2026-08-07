@@ -951,6 +951,9 @@ app.get("/api/v1/rwa-stats", async (req, res) => {
             // reference URL so the UI can render a clickable footnote.
             if (fresh.sourceUrl) entry.sourceUrl = fresh.sourceUrl;
           }
+          if (fresh.yield30d) {
+            entry.yield30d = fresh.yield30d;
+          }
           if (fresh.tvl) {
             entry.marketCap = fresh.tvl;
             entry.supplyTokens = fresh.supplyTokens ?? entry.supplyTokens;

@@ -151,31 +151,35 @@ async function fetchLatestSnapshot(tokenId) {
       orderBy: "timestamp",
       orderDirection: "desc",
       limit: 1
-    ) { items { timestamp yield7d365 tokenPrice } }
+    ) { items { timestamp yield7d365 yield30dComp365 tokenPrice } }
   }`;
   const items = await centrifugeQuery(q).then(d => d?.tokenSnapshots?.items || []);
   return items[0] || null;
 }
 
-function formatCentrifugeYield(snap) {
-  const raw = snap?.yield7d365;
+function _centrifugePct(raw) {
   if (raw == null) return null;
-  let pct;
   try {
-    pct = Number(BigInt(raw)) / CENTRIFUGE_YIELD_SCALE * 100;
-  } catch {
-    return null;
-  }
-  if (!Number.isFinite(pct)) return null;
+    const pct = Number(BigInt(raw)) / CENTRIFUGE_YIELD_SCALE * 100;
+    return Number.isFinite(pct) ? pct : null;
+  } catch { return null; }
+}
+
+function formatCentrifugeYield(snap) {
+  const pct7 = _centrifugePct(snap?.yield7d365);
+  const pct30 = _centrifugePct(snap?.yield30dComp365);
+  if (pct7 == null && pct30 == null) return null;
   const ts = parseInt(snap.timestamp, 10);
   const asOf = Number.isFinite(ts)
     ? new Date(ts).toISOString().slice(0, 10)
     : todayISO();
-  return {
-    yield7d: `${pct.toFixed(2)}%`,
+  const out = {
     asOf,
-    source: "Centrifuge (fund APY, 7d annualized)",
+    source: "Centrifuge (fund APY)",
   };
+  if (pct7 != null) out.yield7d = `${pct7.toFixed(2)}%`;
+  if (pct30 != null) out.yield30d = `${pct30.toFixed(2)}%`;
+  return out;
 }
 
 async function centrifugeQuery(query) {
@@ -222,10 +226,16 @@ async function fetchSpiko() {
       if (res.ok) {
         const data = await res.json();
         const wy = parseFloat(data?.weeklyYield);
+        const my = parseFloat(data?.monthlyYield);
         if (Number.isFinite(wy)) {
           entry.yield7d = `${(wy * 100).toFixed(2)}%`;
+        }
+        if (Number.isFinite(my)) {
+          entry.yield30d = `${(my * 100).toFixed(2)}%`;
+        }
+        if (Number.isFinite(wy) || Number.isFinite(my)) {
           entry.asOf = data?.updatedAt ? data.updatedAt.slice(0, 10) : todayISO();
-          entry.source = "Spiko (7d annualized yield)";
+          entry.source = "Spiko (annualized yield)";
         }
       }
     } catch (e) {

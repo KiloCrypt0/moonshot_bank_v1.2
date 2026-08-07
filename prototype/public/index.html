@@ -2196,7 +2196,7 @@
 
     .rwa-asset-row {
       display: grid;
-      grid-template-columns: 110px 1fr 90px 220px;
+      grid-template-columns: 110px 1fr 78px 78px 220px;
       gap: 16px;
       align-items: center;
       padding: 12px 20px;
@@ -2206,6 +2206,21 @@
       text-decoration: none;
       transition: background 0.12s;
     }
+
+    /* Column-header row above each category's asset list. Same grid as
+       .rwa-asset-row so columns line up perfectly. */
+    .rwa-asset-header {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      font-weight: 600;
+      padding: 8px 20px;
+      background: var(--bg-secondary);
+      border-top: 1px solid var(--border);
+      pointer-events: none;
+    }
+    .rwa-asset-header:hover { background: var(--bg-secondary); }
 
     .rwa-asset-row:hover { background: var(--bg-secondary); }
     .rwa-asset-row:first-of-type { border-top: none; }
@@ -2963,6 +2978,7 @@
       return {
         ...a,
         yield7d: s.yield7d || a.yield7d || null,
+        yield30d: s.yield30d || a.yield30d || null,
         marketCap: s.marketCap || a.marketCap || null,
         statsAsOf: s.asOf || null,
         statsSource: s.source || null,
@@ -3587,6 +3603,15 @@
         if (count === 0) {
           html += `<div class="rwa-empty-category">No assets yet — add issuer addresses to rwa-catalog.json.</div>`;
         } else {
+          html += `
+            <div class="rwa-asset-row rwa-asset-header">
+              <div>Asset</div>
+              <div>Issuer</div>
+              <div class="rwa-asset-yield" title="7-day annualized yield — noisy for funds that distribute recently">7d Yield</div>
+              <div class="rwa-asset-yield" title="30-day annualized yield — more stable view of sustained rate">30d Yield</div>
+              <div class="rwa-asset-address">Address</div>
+            </div>
+          `;
           for (const rawAsset of cat.assets) {
             const a = mergedRwaAsset(rawAsset);
             const isSoroban = !!a.contractId;
@@ -3596,6 +3621,9 @@
               : `<span class="rwa-asset-kind-badge">Classic</span>`;
             const yieldHtml = a.yield7d
               ? `<div class="rwa-asset-yield-cell"><div class="rwa-asset-yield">${escapeHtml(a.yield7d)}</div>${renderAsOf(a.statsAsOf, a.statsSource)}</div>`
+              : `<div class="rwa-asset-yield-cell"><div class="rwa-asset-yield empty">—</div></div>`;
+            const yield30Html = a.yield30d
+              ? `<div class="rwa-asset-yield-cell"><div class="rwa-asset-yield">${escapeHtml(a.yield30d)}</div></div>`
               : `<div class="rwa-asset-yield-cell"><div class="rwa-asset-yield empty">—</div></div>`;
             const href = `#/rwa/${rwaSlug(a)}`;
             // Concatenate everything a user might type in the search box so the
@@ -3612,6 +3640,7 @@
                   ${a.notes ? `<div class="rwa-asset-notes">${escapeHtml(a.notes)}</div>` : ""}
                 </div>
                 ${yieldHtml}
+                ${yield30Html}
                 <div class="rwa-asset-address" title="${escapeHtml(address)}">${escapeHtml(address)}</div>
               </a>
             `;
@@ -3700,6 +3729,9 @@
       const yieldStatHtml = a.yield7d
         ? `<div class="rwa-stat-value yield">${escapeHtml(a.yield7d)}</div>${renderAsOf(a.statsAsOf, a.statsSource)}${sourceLinkHtml}`
         : `<div class="rwa-stat-value muted">—</div>`;
+      const yield30StatHtml = a.yield30d
+        ? `<div class="rwa-stat-value yield">${escapeHtml(a.yield30d)}</div>`
+        : `<div class="rwa-stat-value muted">—</div>`;
       const marketCapStatHtml = a.marketCap
         ? `<div class="rwa-stat-value">${escapeHtml(a.marketCap)}</div>${renderAsOf(a.statsAsOf, a.tvlSource || a.statsSource)}`
         : `<div class="rwa-stat-value muted">—</div>`;
@@ -3726,8 +3758,12 @@
       html += `
           <div class="rwa-stats">
             <div class="rwa-stat">
-              <div class="rwa-stat-label">7-day Yield</div>
+              <div class="rwa-stat-label" title="7-day annualized yield. Can be noisy for funds that distribute recently.">7-day Yield</div>
               ${yieldStatHtml}
+            </div>
+            <div class="rwa-stat">
+              <div class="rwa-stat-label" title="30-day annualized yield. Smoother view of sustained rate.">30-day Yield</div>
+              ${yield30StatHtml}
             </div>
             <div class="rwa-stat">
               <div class="rwa-stat-label">Stellar TVL</div>
