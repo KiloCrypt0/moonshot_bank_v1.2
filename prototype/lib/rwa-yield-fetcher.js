@@ -202,11 +202,16 @@ async function centrifugeQuery(query) {
 
 const SPIKO_API = "https://public-api.spiko.io/v0";
 
+// NOTE: no per-token `fx` hint — the FX currency is read from the /totals
+// response ("netAssetValue.amount.currency") so the fetcher can't drift from
+// Spiko's own denomination. (SAFO is a USD-denominated money-market fund
+// even though Amundi is a European asset manager — a hard-coded EUR hint
+// previously inflated its Stellar TVL by ~15%.)
 const SPIKO_TOKENS = {
-  USTBL: { slug: "ustbl-caruux", stellarContractId: "CARUUX2FZNPH6DGJOEUFSIUQWYHNL5AVDV7PMVSHWL7OBYIBFC76F4TO", decimals: 5, fx: "USD" },
-  EUTBL: { slug: "eutbl-cbgv2q", stellarContractId: "CBGV2QFQBBGEQRUKUMCPO3SZOHDDYO6SCP5CH6TW7EALKVHCXTMWDDOF", decimals: 5, fx: "EUR" },
-  UKTBL: { slug: "uktbl-cdt3ku", stellarContractId: "CDT3KU6TQZNOHKNOHNAFFDQZDURVC3MSTL4ML7TUTZGNOPBZCLABP4FR", decimals: 5, fx: "GBP" },
-  SAFO:  { slug: "safo-cdgsc6",  stellarContractId: "CDGSC6BA4TCAOVSFQCUEHDMOIIHYYVNYBT6YEARS4MX3ITAHUINVGQHX", decimals: 5, fx: "EUR" },
+  USTBL: { slug: "ustbl-caruux", stellarContractId: "CARUUX2FZNPH6DGJOEUFSIUQWYHNL5AVDV7PMVSHWL7OBYIBFC76F4TO", decimals: 5 },
+  EUTBL: { slug: "eutbl-cbgv2q", stellarContractId: "CBGV2QFQBBGEQRUKUMCPO3SZOHDDYO6SCP5CH6TW7EALKVHCXTMWDDOF", decimals: 5 },
+  UKTBL: { slug: "uktbl-cdt3ku", stellarContractId: "CDT3KU6TQZNOHKNOHNAFFDQZDURVC3MSTL4ML7TUTZGNOPBZCLABP4FR", decimals: 5 },
+  SAFO:  { slug: "safo-cdgsc6",  stellarContractId: "CDGSC6BA4TCAOVSFQCUEHDMOIIHYYVNYBT6YEARS4MX3ITAHUINVGQHX", decimals: 5 },
 };
 
 function _spikoFxToUsd(fx) {
@@ -241,7 +246,10 @@ async function fetchSpiko() {
     } catch (e) {
       console.warn(`[rwa-yield-fetcher] Spiko ${symbol} yield failed: ${e.message}`);
     }
-    // TVL: Stellar supply × NAV × FX
+    // TVL: Stellar supply × NAV × FX(if NAV isn't already USD).
+    // Currency comes from the /totals response — never hard-coded — so a
+    // share class that switches or is misclassified in our config can't
+    // silently inflate/deflate the reported TVL.
     try {
       const [totalsRes, supply] = await Promise.all([
         fetch(`${SPIKO_API}/share-classes/${symbol}/totals`),
@@ -250,15 +258,18 @@ async function fetchSpiko() {
       if (totalsRes.ok && Number.isFinite(supply)) {
         const totals = await totalsRes.json();
         const nav = parseFloat(totals?.netAssetValue?.amount?.value);
-        const fx = _spikoFxToUsd(cfg.fx);
+        const navCurrency = totals?.netAssetValue?.amount?.currency;
+        const fx = _spikoFxToUsd(navCurrency);
         if (Number.isFinite(nav) && Number.isFinite(fx)) {
           const usd = supply * nav * fx;
           entry.tvl = formatBigUSD(usd);
           entry.supplyTokens = supply;
-          entry.tvlSource = cfg.fx === "USD"
+          entry.tvlSource = navCurrency === "USD"
             ? "Spiko (Stellar supply × NAV)"
-            : `Spiko (Stellar supply × NAV × ${cfg.fx}/USD)`;
+            : `Spiko (Stellar supply × NAV × ${navCurrency}/USD)`;
           if (!entry.asOf) entry.asOf = todayISO();
+        } else if (Number.isFinite(nav) && !Number.isFinite(fx)) {
+          console.warn(`[rwa-yield-fetcher] Spiko ${symbol}: unknown NAV currency ${navCurrency} — skipping TVL`);
         }
       }
     } catch (e) {
