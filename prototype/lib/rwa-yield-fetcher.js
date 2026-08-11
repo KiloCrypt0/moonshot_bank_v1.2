@@ -207,11 +207,17 @@ const SPIKO_API = "https://public-api.spiko.io/v0";
 // Spiko's own denomination. (SAFO is a USD-denominated money-market fund
 // even though Amundi is a European asset manager — a hard-coded EUR hint
 // previously inflated its Stellar TVL by ~15%.)
+// Spiko exposes each share class as its own record. SAFO (Amundi Overnight)
+// has two classes on Stellar — USD (SAFO / "Spiko Dollar") and EUR (eurSAFO /
+// "Spiko Euro"). Same fund, different denominations. DefiLlama tracks the EUR
+// class under a lowercased "safo" alias which is confusing; here we use the
+// Spiko-canonical symbols verbatim.
 const SPIKO_TOKENS = {
-  USTBL: { slug: "ustbl-caruux", stellarContractId: "CARUUX2FZNPH6DGJOEUFSIUQWYHNL5AVDV7PMVSHWL7OBYIBFC76F4TO", decimals: 5 },
-  EUTBL: { slug: "eutbl-cbgv2q", stellarContractId: "CBGV2QFQBBGEQRUKUMCPO3SZOHDDYO6SCP5CH6TW7EALKVHCXTMWDDOF", decimals: 5 },
-  UKTBL: { slug: "uktbl-cdt3ku", stellarContractId: "CDT3KU6TQZNOHKNOHNAFFDQZDURVC3MSTL4ML7TUTZGNOPBZCLABP4FR", decimals: 5 },
-  SAFO:  { slug: "safo-cdgsc6",  stellarContractId: "CDGSC6BA4TCAOVSFQCUEHDMOIIHYYVNYBT6YEARS4MX3ITAHUINVGQHX", decimals: 5 },
+  USTBL:   { slug: "ustbl-caruux",   stellarContractId: "CARUUX2FZNPH6DGJOEUFSIUQWYHNL5AVDV7PMVSHWL7OBYIBFC76F4TO", decimals: 5 },
+  EUTBL:   { slug: "eutbl-cbgv2q",   stellarContractId: "CBGV2QFQBBGEQRUKUMCPO3SZOHDDYO6SCP5CH6TW7EALKVHCXTMWDDOF", decimals: 5 },
+  UKTBL:   { slug: "uktbl-cdt3ku",   stellarContractId: "CDT3KU6TQZNOHKNOHNAFFDQZDURVC3MSTL4ML7TUTZGNOPBZCLABP4FR", decimals: 5 },
+  SAFO:    { slug: "safo-cdgsc6",    stellarContractId: "CDGSC6BA4TCAOVSFQCUEHDMOIIHYYVNYBT6YEARS4MX3ITAHUINVGQHX", decimals: 5 },
+  eurSAFO: { slug: "eursafo-cboocg", stellarContractId: "CBOOCGZSVRSZFRE4U2NWR2B4RXYVJWRCBTGOUD2JPI2TDJPWMTJX7FZP", decimals: 5 },
 };
 
 function _spikoFxToUsd(fx) {

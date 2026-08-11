@@ -423,12 +423,46 @@
           "contractId": "CDGSC6BA4TCAOVSFQCUEHDMOIIHYYVNYBT6YEARS4MX3ITAHUINVGQHX",
           "issuerName": "Spiko",
           "issuerUrl": "https://www.spiko.io",
-          "description": "Spiko's tokenized share class of an Amundi-managed EUR overnight money market fund. Tracks short-term EUR money-market rates via overnight swap exposure; daily NAV. Distributed on Stellar Soroban (5-decimal share token).",
-          "notes": "Amundi overnight swap fund (EUR-denominated, Soroban)",
+          "description": "Spiko Dollar — the USD share class of Amundi's overnight money market fund. Tracks the Effective Fed Funds Rate (capitalized EFFR + 0.50%) via overnight swap exposure; daily NAV. Distributed on Stellar Soroban (5-decimal share token). This is one of two SAFO share classes on Stellar — see also eurSAFO (EUR class).",
+          "notes": "Amundi overnight swap fund — USD share class (Soroban)",
           "yield7d": null,
           "marketCap": null,
           "trust": {
-            "regulator": "EU money market fund; Spiko-tokenized share class on Stellar; portfolio managed by Amundi",
+            "regulator": "EU money market fund (UCITS USD share class); Spiko-tokenized; portfolio managed by Amundi",
+            "reserves": "USD overnight rates via swap exposure (Amundi-managed short-term MMF)",
+            "attestation": "Chainlink Proof-of-Reserves; daily NAV published on-chain via Spiko oracle",
+            "custody": "Amundi institutional custody (Europe's largest asset manager)",
+            "redemption": "Daily NAV; T+0 subscription/redemption via Spiko app",
+            "transfers": "Public-permissioned (KYC required at mint; freely transferable after)",
+            "audit": "Spiko smart contracts audited (github.com/spiko-tech/contracts)",
+            "stellarSince": "2025"
+          },
+          "venues": [
+            {
+              "name": "Spiko App",
+              "url": "https://app.spiko.io"
+            },
+            {
+              "name": "Soroswap",
+              "url": "https://app.soroswap.finance/swap"
+            },
+            {
+              "name": "SushiSwap V3 (Stellar)",
+              "url": "https://www.sushi.com/stellar/swap"
+            }
+          ]
+        },
+        {
+          "code": "eurSAFO",
+          "contractId": "CBOOCGZSVRSZFRE4U2NWR2B4RXYVJWRCBTGOUD2JPI2TDJPWMTJX7FZP",
+          "issuerName": "Spiko",
+          "issuerUrl": "https://www.spiko.io",
+          "description": "Spiko Euro — the EUR share class of Amundi's overnight money market fund. Tracks capitalized €STR + 0.50% via overnight swap exposure; daily NAV. Same underlying fund as SAFO (USD class) but denominated and yielding in EUR. Distributed on Stellar Soroban (5-decimal share token). By supply this is Spiko's largest tokenized share class on Stellar.",
+          "notes": "Amundi overnight swap fund — EUR share class (Soroban)",
+          "yield7d": null,
+          "marketCap": null,
+          "trust": {
+            "regulator": "EU money market fund (UCITS EUR share class); Spiko-tokenized; portfolio managed by Amundi",
             "reserves": "EUR overnight rates via swap exposure (Amundi-managed short-term MMF)",
             "attestation": "Chainlink Proof-of-Reserves; daily NAV published on-chain via Spiko oracle",
             "custody": "Amundi institutional custody (Europe's largest asset manager)",
