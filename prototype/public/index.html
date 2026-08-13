@@ -2506,27 +2506,41 @@
       text-transform: uppercase;
       letter-spacing: 0.5px;
     }
+    /* Pool list mirrors the RWA tab's table pattern: a column-header row
+       plus grid rows sharing the same template so columns align. */
     .defi-pool-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
+      display: grid;
+      grid-template-columns: 1fr 110px 150px;
       gap: 16px;
+      align-items: center;
       padding: 12px 20px;
       border-top: 1px solid var(--border);
+      transition: background 0.12s;
     }
+    .defi-pool-row:hover { background: var(--bg-secondary); }
+    .defi-pool-header {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      font-weight: 600;
+      padding: 8px 20px;
+      background: var(--bg-secondary);
+    }
+    .defi-pool-header:hover { background: var(--bg-secondary); }
+    .defi-pool-header span:nth-child(n+2) { text-align: right; }
+    .defi-pool-header span[title] { cursor: help; }
     .defi-pool-main { min-width: 0; }
     .defi-pool-name { font-weight: 600; font-size: 14px; color: var(--text-primary); }
     .defi-pool-note { font-size: 12px; color: var(--text-muted); margin-top: 2px; line-height: 1.4; }
-    .defi-pool-stats { display: flex; gap: 24px; flex-shrink: 0; }
-    .defi-pool-stat { text-align: right; min-width: 78px; }
-    .defi-pool-stat-val { font-size: 15px; font-weight: 700; color: var(--text-primary); white-space: nowrap; }
-    .defi-pool-stat-label {
-      font-size: 10px;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      cursor: help;
+    .defi-pool-cell {
+      text-align: right;
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text-primary);
+      white-space: nowrap;
     }
+    .defi-apy-range { font-size: 13px; font-weight: 600; color: var(--green); }
     .defi-reward-apy {
       display: inline-block;
       background: rgba(16,185,129,0.15);
@@ -2579,9 +2593,17 @@
     }
 
     @media (max-width: 720px) {
-      .defi-pool-row { flex-direction: column; align-items: flex-start; gap: 8px; }
-      .defi-pool-stats { width: 100%; justify-content: flex-start; }
-      .defi-pool-stat { text-align: left; }
+      .defi-pool-row { grid-template-columns: 1fr; gap: 4px; }
+      .defi-pool-header { display: none; }
+      .defi-pool-cell { text-align: left; font-size: 14px; }
+      .defi-pool-cell::before {
+        content: attr(data-label) ": ";
+        color: var(--text-muted);
+        font-weight: 500;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
       .defi-reserve-head, .defi-reserve-row { grid-template-columns: 1.2fr 1fr 1fr; }
       .defi-reserve-head span:nth-child(2), .defi-reserve-row span:nth-child(2),
       .defi-reserve-head span:nth-child(3), .defi-reserve-row span:nth-child(3) { display: none; }
@@ -3967,20 +3989,33 @@
         } else {
           html += `<div class="defi-pools">`;
           if (poolsLabel) html += `<div class="defi-pools-label">${poolsLabel}</div>`;
+          html += `<div class="defi-pool-row defi-pool-header"><span>Pool</span><span>TVL</span><span title="Estimated yearly return, compounding included">APY</span></div>`;
           for (const pool of p.pools) {
-            const apyMain = pool.apy != null ? fmtApy(pool.apy) : (pool.reserves ? "" : fmtApy(null));
+            const apyMain = pool.apy != null ? fmtApy(pool.apy) : fmtApy(null);
             const rewardHtml = pool.rewardApy > 0
               ? `<span class="defi-reward-apy" title="Extra rewards paid in the protocol's incentive token">+${(pool.rewardApy * 100).toFixed(2)}%</span>` : "";
+            // Lending markets have per-asset rates, not one number — show the
+            // best supply APY here and the full per-reserve table below.
+            let apyCell;
+            if (pool.reserves && pool.reserves.length) {
+              const supplies = pool.reserves
+                .filter((r) => (r.suppliedUSD || 0) >= 1000)
+                .map((r) => r.supplyApy)
+                .filter((x) => x != null && Number.isFinite(x));
+              apyCell = supplies.length
+                ? `<div class="defi-pool-cell" data-label="APY"><span class="defi-apy-range" title="Highest supply APY in this market — per-asset rates below">up to ${fmtApy(Math.max(...supplies))}</span></div>`
+                : `<div class="defi-pool-cell" data-label="APY"><span class="defi-apy-empty">—</span></div>`;
+            } else {
+              apyCell = `<div class="defi-pool-cell" data-label="APY">${apyMain} ${rewardHtml}</div>`;
+            }
             html += `
               <div class="defi-pool-row">
                 <div class="defi-pool-main">
                   <div class="defi-pool-name">${escapeHtml(pool.name)}</div>
                   <div class="defi-pool-note">${escapeHtml(pool.note || "")}</div>
                 </div>
-                <div class="defi-pool-stats">
-                  <div class="defi-pool-stat"><div class="defi-pool-stat-val">${fmtTvl(pool.tvlUSD)}</div><div class="defi-pool-stat-label">TVL</div></div>
-                  ${pool.reserves ? "" : `<div class="defi-pool-stat"><div class="defi-pool-stat-val">${apyMain} ${rewardHtml}</div><div class="defi-pool-stat-label" title="Estimated yearly return, compounding included">APY</div></div>`}
-                </div>
+                <div class="defi-pool-cell" data-label="TVL">${fmtTvl(pool.tvlUSD)}</div>
+                ${apyCell}
               </div>
             `;
             // Lending pools: per-reserve subtable (supply/borrow APYs per asset)
