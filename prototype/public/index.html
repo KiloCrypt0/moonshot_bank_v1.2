@@ -1436,6 +1436,13 @@
       gap: 8px;
     }
 
+    /* The DeFi *explorer* card reuses this class name, but it must stack like
+       an RWA category card (header band, then desc, then full-width pool list).
+       The flex rule above is for the positions-tab protocol rows only. */
+    .rwa-category.defi-protocol {
+      display: block;
+    }
+
     .defi-protocol-icon {
       width: 32px;
       height: 32px;
