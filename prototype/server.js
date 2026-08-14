@@ -923,11 +923,19 @@ async function fetchClassicMarketCap(code, issuer, xlmPrice) {
   try {
     const url = `${HORIZON_URL}/assets?asset_code=${encodeURIComponent(code)}&asset_issuer=${encodeURIComponent(issuer)}`;
     const res = await fetch(url);
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.warn(`RWA market cap: Horizon ${res.status} for ${code}`);
+      return null;
+    }
     const data = await res.json();
     const records = data?._embedded?.records || [];
     if (records.length === 0) return null;
-    const supply = parseFloat(records[0].amount || "0");
+    // Horizon dropped the flat `amount` field — current responses report
+    // supply as balances.authorized. Keep `amount` as a fallback for older
+    // Horizon deployments.
+    const supply = parseFloat(
+      records[0].balances?.authorized ?? records[0].amount ?? "0"
+    );
     if (!Number.isFinite(supply) || supply <= 0) return null;
     const price = await pricingEngine.priceClassicAsset(
       { priceViaSDEX: getAssetPriceViaSDEX },

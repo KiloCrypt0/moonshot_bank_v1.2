@@ -50,6 +50,17 @@ module.exports = [
     priceHintUSD: 1.0,
   },
   {
+    symbol: "USDT0",
+    name: "USDT0 (omnichain USDT)",
+    kind: "soroban",
+    contractId: "CBSJZEIO5C7KC2SF3MKSNXXJSW5G3VTNBX4ATMKUI3B2MR4JKM4R26YF",
+    decimals: 7,
+    // Low floor while supply seeds (~10k total at launch, Aug 2026);
+    // raise toward the USDC/PYUSD floor once circulation grows.
+    minTokenBalance: 100,
+    priceHintUSD: 1.0,
+  },
+  {
     symbol: "EUTBL",
     name: "EUTBL (Spiko EU T-bills)",
     kind: "soroban",

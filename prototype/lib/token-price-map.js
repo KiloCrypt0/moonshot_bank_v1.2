@@ -24,6 +24,9 @@ const SEED = [
   { coingeckoId: "paypal-usd", symbol: "PYUSD", kind: "soroban", contractId: "CCCRWH6Q3FNP3I2I57BDLM5AFAT7O6OF6GKQOC6SSJNDAVRZ57SPHGU2" },
   // PYUSD also exists as a classic trustline issued by PayPal (CoinGecko only lists the Soroban side).
   { coingeckoId: "paypal-usd", symbol: "PYUSD", kind: "classic", code: "PYUSD", issuer: "GDQE7IGFAOX4PJBPGRTSGE3T5LE7HXNUDA52KNVGMTXVR75DXY67U2V5" },
+  // USDT0 — Tether's omnichain USDT (LayerZero OFT, Everdawn Labs). Stellar launch Aug 2026.
+  { coingeckoId: "usdt0", symbol: "USDT0", kind: "soroban", contractId: "CBSJZEIO5C7KC2SF3MKSNXXJSW5G3VTNBX4ATMKUI3B2MR4JKM4R26YF" },
+  { coingeckoId: "usdt0", symbol: "USDT0", kind: "classic", code: "USDT0", issuer: "GATISXX6BZ6NC7IKQBY37CJD4SOZL3CYZJWXEDG6JVIY4WBS6KXJHN6Q" },
   { coingeckoId: "safo", symbol: "SAFO", kind: "soroban", contractId: "CDGSC6BA4TCAOVSFQCUEHDMOIIHYYVNYBT6YEARS4MX3ITAHUINVGQHX" },
   { coingeckoId: "societe-generale-forge-eurcv", symbol: "EURCV", kind: "soroban", contractId: "CANKBYNNAYKEZXLB655F2UPNTAZFK5HILZUXL7ZTFR3NF6LKDSVY7KFH" },
   { coingeckoId: "solv-btc", symbol: "SOLVBTC", kind: "soroban", contractId: "CBIJBDNZNF4X35BJ4FFZWCDBSCKOP5NB4PLG4SNENRMLAPYG4P5FM6VN" },

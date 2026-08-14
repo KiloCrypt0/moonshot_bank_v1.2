@@ -743,6 +743,32 @@
           ]
         },
         {
+          "code": "USDT0",
+          "issuer": "GATISXX6BZ6NC7IKQBY37CJD4SOZL3CYZJWXEDG6JVIY4WBS6KXJHN6Q",
+          "issuerName": "Tether / Everdawn Labs (USDT0)",
+          "issuerUrl": "https://usdt0.to",
+          "description": "USDT0 is the omnichain deployment of Tether's USDT, operated by Everdawn Labs and backed 1:1 by USDT locked on Ethereum. The Stellar deployment is a classic Stellar asset bridged through the USDT0 mesh; a Soroban SAC wrapper (CBSJZEIO…R26YF) is also live for smart-contract use.",
+          "notes": "Omnichain USDT · newly live on Stellar (supply still seeding)",
+          "yield7d": null,
+          "marketCap": null,
+          "trust": {
+            "regulator": "",
+            "reserves": "1:1 backed by USDT locked on Ethereum (per usdt0.to); underlying USDT backed by Tether reserves",
+            "attestation": "Underlying USDT: quarterly BDO reserve attestations published by Tether",
+            "custody": "",
+            "redemption": "No direct fiat redemption for USDT0 — bridges 1:1 to/from USDT; USDT redemption via Tether (verified accounts)",
+            "transfers": "Open; on-chain issuer flags at listing time: authorization revocable + clawback enabled, issuer home_domain not yet set",
+            "audit": null,
+            "stellarSince": "2026",
+            "jurisdiction": "Everdawn Labs Limited (USDT0 operator); underlying USDT issued by Tether (El Salvador DASP)",
+            "legalClaim": "Holder's claim is on bridged USDT in the Ethereum lockbox, not directly on Tether reserves — one bridge hop removed from the USDT liability",
+            "oracle": "",
+            "contractPermissions": "Classic Stellar asset — issuer retains freeze/clawback (auth_revocable + clawback_enabled verified on-chain 2026-08); cross-chain mint/burn controlled by USDT0 bridge contracts",
+            "counterpartyRisk": "Tether solvency + USDT0 bridge/lockbox contract risk + Everdawn Labs operations",
+            "secondaryMarket": "Minimal on Stellar so far (~10k supply, 12 trustlines at listing, Aug 2026); deep USDT0 liquidity exists on other chains"
+          }
+        },
+        {
           "code": "MGUSD",
           "issuer": "GAIUGZZZSL47BKH27SUDZESZELFJDPE2UM52RACOSFJ7BIVBGKUEJSUZ",
           "issuerName": "MoneyGram",
