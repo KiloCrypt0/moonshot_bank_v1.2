@@ -113,15 +113,28 @@ const PROTOCOL_META = {
   },
   templar: {
     id: "templar",
-    name: "Templar Finance",
+    name: "Templar",
     category: "Lending",
     url: "https://templarfi.org",
     blurb:
-      "Cross-chain lending: post Stellar assets (XLM, SolvBTC, RWAs like deJAAA and " +
-      "CETES) as collateral and borrow stablecoins. The lending engine runs on NEAR " +
-      "via chain signatures, with Stellar-side custody accounts holding collateral. " +
-      "Stellar-side deposits are currently below this page's TVL threshold, so no " +
-      "individual markets are listed yet.",
+      "Cross-chain lending settled on NEAR: deposit USDC to earn yield, or borrow against collateral including Stellar assets (XLM, CETES, USTRY, deJAAA) bridged via HOT Omni. Rates float per market.",
+  },
+  k2: {
+    id: "k2",
+    name: "K2 Lend",
+    category: "Lending",
+    url: "https://app.k2lend.com",
+    blurb:
+      "Aave-V3-style lending on Soroban by Kinetic: supply USDC, XLM, PYUSD, or SolvBTC to earn interest, or borrow against your deposits. Isolated risk per reserve with RedStone oracles.",
+  },
+  etherfuse: {
+    id: "etherfuse",
+    name: "Etherfuse Stablebonds",
+    category: "RWA Yield",
+    url: "https://etherfuse.com",
+    thresholdExempt: true,
+    blurb:
+      "Tokenized sovereign bonds (CETES, USTRY, EUROB, TESOURO, KTB) that accrue yield while you hold them. Below: every venue on Stellar where the bonds earn or trade — lending markets and AMM pools included regardless of size.",
   },
 };
 
@@ -193,8 +206,7 @@ async function fetchAquarius() {
     for (const p of data.items || []) {
       const tvl = Number(p.liquidity_usd || 0) / AQUA_SCALE;
       totalTvl += tvl;
-      if (tvl < MIN_POOL_TVL_USD) continue;
-      const codes = (p.tokens_str || []).map(_aquaTokenCode);
+        const codes = (p.tokens_str || []).map(_aquaTokenCode);
       const baseApy = Number(p.apy || 0);
       const rewardsApy = Number(p.rewards_apy || 0) + Number(p.incentive_apy || 0);
       const typeLabel = p.pool_type === "stable" ? "stable"
@@ -239,7 +251,6 @@ async function fetchBlend() {
   for (const p of overview) {
     const suppliedUSD = p.reserves.reduce((s, r) => s + (r.suppliedUSD || 0), 0);
     totalTvl += suppliedUSD;
-    if (suppliedUSD < MIN_POOL_TVL_USD) continue;
     const assets = p.reserves.map((r) => r.symbol);
     pools.push({
       assets,
@@ -362,7 +373,6 @@ async function fetchSushi() {
   for (const r of rows) {
     if (!r) continue;
     totalTvl += r.tvl;
-    if (r.tvl < MIN_POOL_TVL_USD) continue;
     const feePct = r.fee / 10000;
     pools.push({
       assets: [r.symA, r.symB],
@@ -471,7 +481,6 @@ async function fetchSoroswap() {
   for (const r of rows) {
     if (!r) continue;
     totalTvl += r.tvl;
-    if (r.tvl < MIN_POOL_TVL_USD) continue;
     pools.push({
       assets: [r.sym0, r.sym1],
       name: `${r.sym0} / ${r.sym1}`,
@@ -513,7 +522,6 @@ async function fetchUpshift() {
   for (const v of vaults) {
     const tvl = Number(v.tvl || v.latest_reported_tvl || 0); // USD (verified)
     totalTvl += tvl;
-    if (tvl < MIN_POOL_TVL_USD) continue;
     const apy = Number(v.reported_apy?.apy ?? 0) || null;
     const meta = v.stellar_vault_metadata || {};
     const depositSym = meta.deposit_token_symbol || "?";
@@ -574,41 +582,280 @@ async function fetchSentora() {
   };
 }
 
-// ── Templar (card only) ─────────────────────────────────────────────────────
+// ── Templar (markets + snapshots APIs; NEAR-settled, Stellar collateral) ────
 
-const TEMPLAR_G = "GDJ4JZXZELZD737NVFORH4PSSQDWFDZTKW3AIDKHYQG23ZXBPDGGQBJK";
+// CoinGecko ids exactly as Templar's own UI requests them (observed via
+// network capture on app.templarfi.org/markets — a known-good id set).
+const TEMPLAR_CG_IDS = {
+  ibtc: "bitcoin", ixlm: "stellar", izec: "zcash", ixrp: "xrp",
+  idoge: "doge", iltc: "ltc", iada: "ada", iethhemibtc: "hemibtc",
+  iethwbtc: "bitcoin", iethfxrp: "fxrp", stnear: "near",
+  ixlmsolvbtc: "bitcoin", ixlmcetes: "cetes", ixlmustry: "ustry",
+  ixlmdejaaa: "dejaaa", ixlmdejtrsy: "dejtrsy",
+};
+const TEMPLAR_STABLE_BORROW = new Set(["usdc", "ixlmusdc", "iethusdc", "ixlmpyusd", "pyusd"]);
 
-async function fetchTemplar() {
-  // Best-effort custody TVL for the protocol card; no pool rows (below threshold).
-  let tvl = 0;
-  try {
-    const res = await fetch(`https://horizon.stellar.org/accounts/${TEMPLAR_G}`, {
-      headers: { "User-Agent": "StellarScope/1.0" },
-    });
-    if (res.ok) {
-      const acct = await res.json();
-      const xlmPrice = (await _priceToken(XLM_SAC)) || 0;
-      for (const b of acct.balances || []) {
-        const amt = Number(b.balance || 0);
-        if (b.asset_type === "native") tvl += amt * xlmPrice;
-        else if ((b.asset_code || "").startsWith("USD")) tvl += amt; // USDC ≈ $1
-      }
-    }
-  } catch { /* card renders with tvl 0 */ }
-  return {
-    ...PROTOCOL_META.templar,
-    totalTvlUSD: tvl,
-    poolsShown: 0,
-    poolsTotal: 0,
-    hasApyData: false,
-    pools: [],
-  };
+function templarSlugParts(deployment) {
+  // e.g. "ixlm-ixlmusdc-1.v1.tmplr.near" -> { collat: "ixlm", borrow: "ixlmusdc" }
+  const stem = deployment.split(".")[0].replace(/-\d+$/, "");
+  const dash = stem.indexOf("-");
+  return { collat: stem.slice(0, dash), borrow: stem.slice(dash + 1) };
 }
 
+function templarPretty(sym) {
+  const map = {
+    ibtc: "BTC", ixlm: "XLM", izec: "ZEC", ixrp: "XRP", idoge: "DOGE", iltc: "LTC",
+    iada: "ADA", iethhemibtc: "hemiBTC", iethwbtc: "WBTC", iethfxrp: "FXRP",
+    stnear: "stNEAR", ixlmusdc: "USDC", iethusdc: "USDC", ixlmpyusd: "PYUSD",
+    ixlmsolvbtc: "SolvBTC", ixlmcetes: "CETES", ixlmustry: "USTRY",
+    ixlmdejaaa: "deJAAA", ixlmdejtrsy: "deJTRSY",
+  };
+  return map[sym] || sym.toUpperCase();
+}
+
+async function fetchTemplar() {
+  const [marketsRes, snapsRes] = await Promise.all([
+    fetch("https://app.templarfi.org/api/markets", { signal: AbortSignal.timeout(15000) }),
+    fetch("https://app.templarfi.org/api/snapshots?domain=app", { signal: AbortSignal.timeout(15000) }),
+  ]);
+  if (!marketsRes.ok || !snapsRes.ok) throw new Error("templar api unavailable");
+  const marketsJson = await marketsRes.json();
+  const snapsJson = await snapsRes.json();
+  const configs = new Map();
+  for (const m of marketsJson.markets || []) configs.set(m.deployment, m);
+
+  // Price the collateral legs the same way Templar's own UI does (CoinGecko ids)
+  const cgIds = [...new Set(Object.values(TEMPLAR_CG_IDS))].join("%2C");
+  let prices = { ...(fetchTemplar._lastPrices || {}) };
+  try {
+    const pr = await fetch(
+      `https://api.coingecko.com/api/v3/simple/price?ids=${cgIds}&vs_currencies=usd`,
+      { signal: AbortSignal.timeout(12000) }
+    );
+    if (pr.ok) {
+      const fresh = await pr.json();
+      prices = { ...prices, ...fresh };
+      fetchTemplar._lastPrices = prices;
+    }
+  } catch (_) {}
+  // Belt-and-braces: XLM price from our own pricing engine if CG failed
+  if (!prices.stellar?.usd) {
+    try {
+      const { priceSorobanToken } = require("./pricing-engine");
+      const p = await priceSorobanToken("CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA", "XLM");
+      if (p?.usd) prices.stellar = { usd: p.usd };
+    } catch (_) {}
+  }
+
+  const pools = [];
+  let totalTvl = 0;
+  for (const entry of snapsJson.marketSnapshots || []) {
+    const dep = entry.deployment || "";
+    if (dep.startsWith("liqtest")) continue;
+    const { collat, borrow } = templarSlugParts(dep);
+    const cfg = configs.get(dep);
+    const snap = entry.snapshot || {};
+
+    const borrowDepositsUSD = TEMPLAR_STABLE_BORROW.has(borrow)
+      ? Number(entry.totalDepositsRaw || 0)
+      : Number(entry.totalDepositsRaw || 0) *
+        (prices[TEMPLAR_CG_IDS[borrow]]?.usd || 0);
+
+    const collatDecimals =
+      cfg?.configuration?.price_oracle_configuration?.collateral_asset_decimals ?? 8;
+    const collatUnits = Number(snap.collateral_asset_deposited || 0) / 10 ** collatDecimals;
+    const collatPrice = prices[TEMPLAR_CG_IDS[collat]]?.usd || 0;
+    const collatUSD = collatUnits * collatPrice;
+
+    const tvl = borrowDepositsUSD + collatUSD;
+    if (!(tvl > 0)) continue;
+    totalTvl += tvl;
+
+    const supplyApy = Number(entry.yield || 0);
+    const borrowApr = Number(snap.interest_rate || 0);
+    const stellarSide = /xlm|cetes|ustry|dejaaa|dejtrsy/.test(collat + borrow);
+
+    pools.push({
+      assets: [templarPretty(borrow), templarPretty(collat)],
+      name: `${templarPretty(borrow)} / ${templarPretty(collat)}`,
+      tvlUSD: tvl,
+      apy: supplyApy,
+      rewardApy: 0,
+      note:
+        `Supply ${templarPretty(borrow)} to earn ${(supplyApy * 100).toFixed(2)}%; ` +
+        `borrow against ${templarPretty(collat)} at ${(borrowApr * 100).toFixed(2)}% APR. ` +
+        `$${Math.round(Number(entry.availableBalance || 0)).toLocaleString()} available to borrow.` +
+        (stellarSide ? " Stellar-side assets." : ""),
+      detail: {
+        supplyApy, borrowApr,
+        depositsUSD: borrowDepositsUSD,
+        collateralUSD: collatUSD,
+        availableUSD: Number(entry.availableBalance || 0),
+      },
+    });
+  }
+  pools.sort((a, b) => (b.tvlUSD || 0) - (a.tvlUSD || 0));
+
+  return {
+    ...PROTOCOL_META.templar,
+    totalTvlUSD: totalTvl,
+    poolsTotal: pools.length,
+    hasApyData: true,
+    pools,
+  };
+}
 // ── Refresh orchestration ───────────────────────────────────────────────────
 
 // protocolId -> { ts, value, error, lastAttempt }
 const cache = new Map();
+
+// ── K2 Lend (Aave-V3 port on Soroban by Kinetic) ────────────────────────────
+// Rates and indexes are RAY-scaled (1e27) — verified live 2026-08-14 against
+// app.k2lend.com (SolvBTC reserve: 0.10228 on-chain == 10.23% in their UI).
+
+const K2_ROUTER =
+  process.env.K2_ROUTER_CONTRACT ||
+  "CCTUJZLYFAW7ZNQD2SXMUZIHBUUJJICYRKWLZJ6SK6TGNAWNXOJIV6J7";
+const K2_RAY = 1e27;
+
+async function k2View(contractId, method, args = []) {
+  const rpc = require("./soroban-rpc");
+  const { scValToNative } = require("@stellar/stellar-sdk");
+  const r = await rpc.simulateContractCall(contractId, method, args);
+  return r == null ? null : scValToNative(r);
+}
+
+async function fetchK2() {
+  const { Address } = require("@stellar/stellar-sdk");
+  const { priceSorobanToken } = require("./pricing-engine");
+  const assets = await k2View(K2_ROUTER, "get_reserves_list");
+  if (!Array.isArray(assets) || !assets.length) throw new Error("k2 reserves unavailable");
+
+  const reserves = [];
+  let supplied = 0, borrowed = 0;
+  for (const asset of assets) {
+    const d = await k2View(K2_ROUTER, "get_reserve_data", [new Address(asset).toScVal()]);
+    if (!d) continue;
+    let symbol = asset.slice(0, 4), decimals = 7;
+    try { symbol = String(await k2View(asset, "symbol")).replace(/\0+$/, ""); } catch (_) {}
+    if (symbol === "native") symbol = "XLM";
+    try { decimals = Number(await k2View(asset, "decimals")); } catch (_) {}
+    const denom = 10 ** decimals;
+    const liqIdx = Number(d.liquidity_index) / K2_RAY;
+    const borIdx = Number(d.variable_borrow_index) / K2_RAY;
+    let aSupply = 0n, dSupply = 0n;
+    try { aSupply = BigInt(await k2View(d.a_token_address, "total_supply")); } catch (_) {}
+    try { dSupply = BigInt(await k2View(d.debt_token_address, "total_supply")); } catch (_) {}
+    const suppliedUnits = (Number(aSupply) / denom) * liqIdx;
+    const borrowedUnits = (Number(dSupply) / denom) * borIdx;
+    let usd = null;
+    try { const p = await priceSorobanToken(asset, symbol); usd = p && p.usd != null ? p.usd : null; } catch (_) {}
+    const suppliedUSD = usd != null ? suppliedUnits * usd : 0;
+    const borrowedUSD = usd != null ? borrowedUnits * usd : 0;
+    supplied += suppliedUSD;
+    borrowed += borrowedUSD;
+    reserves.push({
+      symbol,
+      suppliedUSD,
+      borrowedUSD,
+      supplyApy: Number(d.current_liquidity_rate) / K2_RAY,
+      borrowApy: Number(d.current_variable_borrow_rate) / K2_RAY,
+      utilization: suppliedUnits > 0 ? borrowedUnits / suppliedUnits : 0,
+    });
+  }
+
+  return {
+    ...PROTOCOL_META.k2,
+    totalTvlUSD: supplied,
+    poolsTotal: 1,
+    hasApyData: true,
+    pools: [{
+      assets: reserves.map((r) => r.symbol),
+      name: "Primary Market",
+      tvlUSD: supplied,
+      apy: null,
+      rewardApy: 0,
+      note: "Lending market — supply any listed asset to earn interest, or borrow against your deposits. Rates float with utilization.",
+      reserves,
+    }],
+  };
+}
+
+// ── Etherfuse Stablebonds (aggregator: every Stellar venue holding the bonds) ─
+// Reads the already-cached snapshots of other venues plus the RWA yield feed;
+// registered last in FETCHERS so those caches are warm. Threshold-exempt.
+
+const ETHERFUSE_SYMBOLS = ["CETES", "USTRY", "EUROB", "TESOURO", "KTB", "MXNE", "MXNe"];
+
+function etherfuseMatch(name) {
+  const up = String(name || "").toUpperCase();
+  return ETHERFUSE_SYMBOLS.some((s) => up.includes(s.toUpperCase()));
+}
+
+async function fetchEtherfuse() {
+  const pools = [];
+  let totalTvl = 0;
+
+  // 1) Bond yields from the RWA feed (issuance APY per bond)
+  let bondApy = {};
+  try {
+    const rwa = require("./rwa-yields.json");
+    for (const [key, v] of Object.entries(rwa)) {
+      const up = key.toUpperCase();
+      for (const s of ETHERFUSE_SYMBOLS) {
+        if (up.includes(s.toUpperCase()) && v && v.apy != null) bondApy[s.toUpperCase()] = Number(v.apy);
+      }
+    }
+  } catch (_) {}
+
+  // 2) Cross-venue sweep of cached snapshots (blend reserves, AMM pairs)
+  for (const venueId of ["blend", "aquarius", "soroswap"]) {
+    const entry = cache.get(venueId);
+    const venue = entry && entry.value;
+    if (!venue || !Array.isArray(venue.pools)) continue;
+    for (const pool of venue.pools) {
+      const hitPool = etherfuseMatch(pool.name) || (pool.assets || []).some(etherfuseMatch);
+      const hitReserves = (pool.reserves || []).some((r) => etherfuseMatch(r.symbol));
+      if (!hitPool && !hitReserves) continue;
+      const tvl = hitPool ? (pool.tvlUSD || 0)
+        : (pool.reserves || []).filter((r) => etherfuseMatch(r.symbol))
+            .reduce((s, r) => s + (r.suppliedUSD || 0), 0);
+      totalTvl += tvl;
+      pools.push({
+        assets: pool.assets || [],
+        name: `${pool.name} — via ${PROTOCOL_META[venueId].name}`,
+        tvlUSD: tvl,
+        apy: pool.apy ?? null,
+        rewardApy: pool.rewardApy || 0,
+        note: hitPool
+          ? `Stablebond liquidity on ${PROTOCOL_META[venueId].name}. ${pool.note || ""}`.trim()
+          : `Stablebond reserves inside this ${PROTOCOL_META[venueId].name} lending pool.`,
+      });
+    }
+  }
+
+  // 3) Standalone bond rows so every bond and its hold-to-earn APY is visible
+  for (const s of ["CETES", "USTRY", "EUROB", "TESOURO", "KTB"]) {
+    if (bondApy[s] == null) continue;
+    pools.push({
+      assets: [s],
+      name: `${s} stablebond (hold to earn)`,
+      tvlUSD: 0,
+      apy: bondApy[s],
+      rewardApy: 0,
+      note: "Yield accrues to the token itself — no pool needed. Buy on the DEX or mint at etherfuse.com.",
+    });
+  }
+
+  pools.sort((a, b) => (b.tvlUSD || 0) - (a.tvlUSD || 0));
+  return {
+    ...PROTOCOL_META.etherfuse,
+    totalTvlUSD: totalTvl,
+    poolsTotal: pools.length,
+    hasApyData: true,
+    pools,
+  };
+}
 
 const FETCHERS = [
   { id: "blend", fn: fetchBlend, interval: 5 * 60_000 },
@@ -617,7 +864,9 @@ const FETCHERS = [
   { id: "sushiswap", fn: fetchSushi, interval: 5 * 60_000 },
   { id: "upshift", fn: fetchUpshift, interval: 60_000 },
   { id: "sentora", fn: fetchSentora, interval: 5 * 60_000 },
-  { id: "templar", fn: fetchTemplar, interval: 24 * 60 * 60_000 },
+  { id: "templar", fn: fetchTemplar, interval: 10 * 60_000 },
+  { id: "k2", fn: fetchK2, interval: 5 * 60_000 },
+  { id: "etherfuse", fn: fetchEtherfuse, interval: 5 * 60_000 },
 ];
 
 let _refreshing = false;
@@ -658,13 +907,23 @@ function start() {
 
 // ── Public read API (request path — cache only, never fetches) ──────────────
 
-function getSnapshot() {
+function getSnapshot(opts = {}) {
+  const includeAll = Boolean(opts.full);
   const protocols = [];
   for (const f of FETCHERS) {
     const entry = cache.get(f.id);
     if (entry?.value) {
+      const v = entry.value;
+      const exempt = Boolean(PROTOCOL_META[f.id]?.thresholdExempt);
+      // Fetchers keep ALL pools (sorted desc); the threshold is applied here
+      // so the summary stays clean while detail pages can show everything.
+      const sorted = [...(v.pools || [])].sort((a, b) => (b.tvlUSD || 0) - (a.tvlUSD || 0));
+      const visible = exempt ? sorted : sorted.filter((p) => (p.tvlUSD || 0) >= MIN_POOL_TVL_USD || p.reserves);
       protocols.push({
-        ...entry.value,
+        ...v,
+        pools: includeAll ? sorted : visible,
+        poolsShown: visible.length,
+        poolsTotal: v.poolsTotal ?? sorted.length,
         lastUpdated: entry.ts ? new Date(entry.ts).toISOString() : null,
         stale: entry.error != null,
       });
@@ -692,4 +951,9 @@ function getSnapshot() {
   };
 }
 
-module.exports = { start, getSnapshot, refreshOnce, MIN_POOL_TVL_USD };
+function getProtocolDetail(id) {
+  const snap = getSnapshot({ full: true });
+  return snap.protocols.find((p) => p.id === id) || null;
+}
+
+module.exports = { start, getSnapshot, getProtocolDetail, refreshOnce, MIN_POOL_TVL_USD };

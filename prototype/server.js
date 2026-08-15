@@ -21,6 +21,7 @@ const LPDiscoveryAdapter = require("./lib/adapters/lp-discovery");
 const SentoraAdapter = require("./lib/adapters/sentora");
 const snapshotScheduler = require("./lib/snapshot-scheduler");
 const rwaYieldFetcher = require("./lib/rwa-yield-fetcher");
+const K2Adapter = require("./lib/adapters/k2");
 const defiExplorer = require("./lib/defi-explorer");
 const createPublicApiRoutes = require("./lib/public-api-routes");
 const { resolveNfts } = require("./lib/nft-resolver");
@@ -91,6 +92,7 @@ const horizon = getHorizon();
 // pool the discovery adapter misses (e.g. nascent protocols).
 const PROTOCOL_ADAPTERS = [
   BlendAdapter,
+  K2Adapter,
   AquariusAdapter,
   TemplarAdapter,
   SushiSwapV3Adapter,
