@@ -956,9 +956,19 @@ async function fetchClassicMarketCap(code, issuer, xlmPrice) {
 // Serves the background-refreshed cache instantly; never fetches on the
 // request path. First boot may return protocols with loading:true until the
 // initial refresh cycle completes (~2 min; Soroswap is the long pole).
-app.get("/api/v1/defi-explorer", (_req, res) => {
+app.get("/api/v1/defi-explorer", (req, res) => {
   res.set("Cache-Control", "public, max-age=60");
-  res.json(defiExplorer.getSnapshot());
+  res.json(defiExplorer.getSnapshot({ full: req.query.full === "1" }));
+});
+
+// Per-protocol detail: every pool, no TVL threshold (drill-down pages).
+// The frontend's #/defi/{id} route depends on this; without it every
+// protocol detail page 404s.
+app.get("/api/v1/defi-explorer/:id", (req, res) => {
+  const detail = defiExplorer.getProtocolDetail(req.params.id);
+  if (!detail) return res.status(404).json({ error: "unknown protocol" });
+  res.set("Cache-Control", "public, max-age=60");
+  res.json(detail);
 });
 
 app.get("/api/v1/rwa-stats", async (req, res) => {
