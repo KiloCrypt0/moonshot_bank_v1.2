@@ -42,9 +42,11 @@ async function getReserveMeta(asset, data) {
   let symbol = null, decimals = 7;
   try { symbol = await view(asset, "symbol"); } catch (_) {}
   try { decimals = Number(await view(asset, "decimals")); } catch (_) {}
+  let cleanSymbol = typeof symbol === "string" ? symbol.replace(/\0+$/, "") : asset.slice(0, 4);
+  if (cleanSymbol === "native") cleanSymbol = "XLM"; // SAC XLM reports "native"
   const meta = {
     asset,
-    symbol: typeof symbol === "string" ? symbol.replace(/\0+$/, "") : asset.slice(0, 4),
+    symbol: cleanSymbol,
     decimals: Number.isFinite(decimals) ? decimals : 7,
     aToken: data.a_token_address,
     debtToken: data.debt_token_address,
@@ -97,7 +99,8 @@ async function getPositions(userAddress) {
     const borrowed = (Number(scaledDebt) / denom) * borrowIndex;
 
     let price = null;
-    try { price = await priceSorobanToken(asset, meta.symbol); } catch (_) {}
+    // Second arg is an OPTIONS object ({ decimals }), not a symbol string.
+    try { price = await priceSorobanToken(asset, { decimals: meta.decimals }); } catch (_) {}
     const usd = price && price.usd != null ? price.usd : null;
     const suppliedUSD = usd != null ? supplied * usd : 0;
     const borrowedUSD = usd != null ? borrowed * usd : 0;
@@ -136,22 +139,28 @@ async function getPositions(userAddress) {
 
   const flat = [];
   for (const r of rows) {
-    if (r.suppliedUSD !== 0) {
+    // Gate on TOKEN AMOUNTS, not USD value: when the price lookup fails,
+    // USD is 0 but the position — especially a borrow LIABILITY — still
+    // exists. Dropping unpriced borrows overstated net worth by the whole
+    // debt. Unpriced positions carry valueUSD 0 and unpriced:true so the
+    // UI can render the amount with a "no price" marker.
+    const unpriced = r.price == null;
+    if (r.supplied > 0) {
       flat.push({
         protocol: "k2", type: "lending", subtype: "collateral",
         poolContractId: K2_ROUTER, poolName: group.poolName,
         asset: r.asset, assetAddress: r.assetAddress, decimals: r.decimals,
         underlyingAmount: r.supplied, valueUSD: r.suppliedUSD,
-        apy: r.supplyApy, price: r.price,
+        apy: r.supplyApy, price: r.price, unpriced,
       });
     }
-    if (r.borrowedUSD !== 0) {
+    if (r.borrowed > 0) {
       flat.push({
         protocol: "k2", type: "borrowing", subtype: "liability",
         poolContractId: K2_ROUTER, poolName: group.poolName,
         asset: r.asset, assetAddress: r.assetAddress, decimals: r.decimals,
         underlyingAmount: r.borrowed, valueUSD: -r.borrowedUSD,
-        apy: r.borrowApy, price: r.price,
+        apy: r.borrowApy, price: r.price, unpriced,
       });
     }
   }

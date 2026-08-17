@@ -4225,6 +4225,7 @@
     }
 
     async function renderDefiDetailPage(protocolId) {
+      const render = claimRender();
       const app = document.getElementById("app");
       app.innerHTML = `<div class="rwa-page"><div class="rwa-page-title">Loading…</div></div>`;
       let p;
@@ -4232,7 +4233,9 @@
         const res = await fetch(`${API_BASE}/api/v1/defi-explorer/${encodeURIComponent(protocolId)}`);
         if (!res.ok) throw new Error("HTTP " + res.status);
         p = await res.json();
+        if (renderSuperseded(render)) return;
       } catch (e) {
+        if (renderSuperseded(render)) return;
         app.innerHTML = `<div class="rwa-page"><a class="rwa-back-link" href="#/defi">← All protocols</a><div class="error-banner">Failed to load: ${escapeHtml(e.message)}</div></div>`;
         return;
       }
@@ -4896,10 +4899,11 @@
         if (loaded) return;
       }
 
-      // Honor deep-links to #/rwas or #/rwa/{slug} before loading leaderboards.
-      const { page, slug } = pageFromHash();
-      if (page === "rwas") {
-        switchPage("rwas");
+      // Honor deep-links (#/rwas, #/rwa/{slug}, #/defi, #/defi/{id})
+      // before loading leaderboards.
+      const { page, slug, protocolId } = pageFromHash();
+      if (page === "rwas" || page === "defi") {
+        switchPage(page);
         return;
       }
       if (page === "rwa-detail") {
@@ -4908,6 +4912,14 @@
           t.classList.toggle("active", t.getAttribute("data-page") === "rwas");
         });
         renderRwaDetailPage(slug);
+        return;
+      }
+      if (page === "defi-detail") {
+        currentPage = "defi";
+        document.querySelectorAll(".page-nav-tab").forEach((t) => {
+          t.classList.toggle("active", t.getAttribute("data-page") === "defi");
+        });
+        renderDefiDetailPage(protocolId);
         return;
       }
       setTimeout(() => {
@@ -6299,10 +6311,15 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
       const totalBorrowed = byPool.reduce((s, p) => s + (p.totalBorrowedUSD || 0), 0);
       const netDefiUSD = totalSupplied - totalBorrowed;
       const totalPendingBlnd = byPool.reduce((s, p) => s + (p.totalPendingBlnd || 0), 0);
-      const nonBlendValueUSD = positions
-        .filter(p => p.protocol !== "blend")
+      // Protocols with a byPool group (blend, k2, ...) are already counted in
+      // netDefiUSD — their flat positions must be excluded here or the value
+      // double-counts. A literal !== "blend" check broke the day K2 became
+      // the second grouped protocol.
+      const groupedProtocols = new Set(byPool.map(g => g.protocol));
+      const ungroupedValueUSD = positions
+        .filter(p => !groupedProtocols.has(p.protocol))
         .reduce((s, p) => s + (p.valueUSD || 0), 0);
-      const netDefiTotal = netDefiUSD + nonBlendValueUSD;
+      const netDefiTotal = netDefiUSD + ungroupedValueUSD;
 
       let html = "";
 
@@ -6412,8 +6429,10 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         html += `</div>`;
       }
 
-      // ── Non-Blend positions (SushiSwap, Solv, etc.) ────────────────────
-      const otherPositions = positions.filter(p => p.protocol !== "blend");
+      // ── Ungrouped positions (SushiSwap, Solv, etc.) ────────────────────
+      // Grouped protocols (blend, k2, ...) already rendered per-pool tables
+      // above — repeating their flat positions here double-rendered them.
+      const otherPositions = positions.filter(p => !groupedProtocols.has(p.protocol));
       otherPositions.forEach((pos) => {
         const protocolIcon = pos.protocol === "sushiswap-v3" ? "sushi"
           : pos.protocol === "solv-protocol" ? "solv"

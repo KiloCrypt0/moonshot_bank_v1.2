@@ -584,14 +584,29 @@ async function fetchSentora() {
 
 // ── Templar (markets + snapshots APIs; NEAR-settled, Stellar collateral) ────
 
-// CoinGecko ids exactly as Templar's own UI requests them (observed via
-// network capture on app.templarfi.org/markets — a known-good id set).
+// CoinGecko ids — every id below verified live against /simple/price on
+// 2026-08-17. (The previous set used ticker-style ids like "ltc"/"ada"/"xrp"
+// that CoinGecko doesn't recognize, and "doge" which resolves to an
+// unrelated token — those collateral legs priced at $0 or garbage.)
 const TEMPLAR_CG_IDS = {
-  ibtc: "bitcoin", ixlm: "stellar", izec: "zcash", ixrp: "xrp",
-  idoge: "doge", iltc: "ltc", iada: "ada", iethhemibtc: "hemibtc",
-  iethwbtc: "bitcoin", iethfxrp: "fxrp", stnear: "near",
-  ixlmsolvbtc: "bitcoin", ixlmcetes: "cetes", ixlmustry: "ustry",
-  ixlmdejaaa: "dejaaa", ixlmdejtrsy: "dejtrsy",
+  ibtc: "bitcoin", ixlm: "stellar", izec: "zcash", ixrp: "ripple",
+  idoge: "dogecoin", iltc: "litecoin", iada: "cardano",
+  iethhemibtc: "hemi-bitcoin",
+  iethwbtc: "bitcoin",
+  // FXRP is Flare's 1:1 XRP-backed wrapper — no CoinGecko listing; XRP ≈ fair
+  iethfxrp: "ripple",
+  stnear: "staked-near", // stNEAR trades ~1.5x NEAR — "near" underpriced it
+  ixlmsolvbtc: "bitcoin", ixlmcetes: "cetes", ixlmustry: "etherfuse-ustry",
+  // deJAAA / deJTRSY have no CoinGecko listing — priced via our own
+  // pricing engine below using their Soroban contract ids.
+  ixlmdejaaa: "soroban:dejaaa", ixlmdejtrsy: "soroban:dejtrsy",
+};
+
+// Soroban contract ids for collateral tokens CoinGecko doesn't list
+// (sourced from rwa-catalog.json).
+const TEMPLAR_SOROBAN_PRICE_IDS = {
+  "soroban:dejaaa": "CC64WBDGS6QQP22QTTIACYIXT3WF7BBQEYOQPLTP7GTKYY7PZ74QYGSL",
+  "soroban:dejtrsy": "CBI7UCH5KGSVQRO5H4SUCZUTZABCITZLRHQQZTWL2TK4RZ72TAR6IHRV",
 };
 const TEMPLAR_STABLE_BORROW = new Set(["usdc", "ixlmusdc", "iethusdc", "ixlmpyusd", "pyusd"]);
 
@@ -624,8 +639,10 @@ async function fetchTemplar() {
   const configs = new Map();
   for (const m of marketsJson.markets || []) configs.set(m.deployment, m);
 
-  // Price the collateral legs the same way Templar's own UI does (CoinGecko ids)
-  const cgIds = [...new Set(Object.values(TEMPLAR_CG_IDS))].join("%2C");
+  // Price the collateral legs via CoinGecko (verified id set above)
+  const cgIds = [
+    ...new Set(Object.values(TEMPLAR_CG_IDS).filter((id) => !id.startsWith("soroban:"))),
+  ].join("%2C");
   let prices = { ...(fetchTemplar._lastPrices || {}) };
   try {
     const pr = await fetch(
@@ -642,8 +659,22 @@ async function fetchTemplar() {
   if (!prices.stellar?.usd) {
     try {
       const { priceSorobanToken } = require("./pricing-engine");
-      const p = await priceSorobanToken("CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA", "XLM");
+      const p = await priceSorobanToken("CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA");
       if (p?.usd) prices.stellar = { usd: p.usd };
+    } catch (_) {}
+  }
+
+  // Stellar-side collateral tokens CoinGecko doesn't list (deJAAA, deJTRSY):
+  // price through our own engine (SDEX / Soroswap aggregator).
+  for (const [key, contractId] of Object.entries(TEMPLAR_SOROBAN_PRICE_IDS)) {
+    if (prices[key]?.usd) continue; // cached from a previous cycle
+    try {
+      const { priceSorobanToken } = require("./pricing-engine");
+      const p = await priceSorobanToken(contractId);
+      if (p?.usd) {
+        prices[key] = { usd: p.usd };
+        fetchTemplar._lastPrices = prices;
+      }
     } catch (_) {}
   }
 
@@ -669,11 +700,16 @@ async function fetchTemplar() {
 
     const tvl = borrowDepositsUSD + collatUSD;
     if (!(tvl > 0)) continue;
-    totalTvl += tvl;
 
     const supplyApy = Number(entry.yield || 0);
     const borrowApr = Number(snap.interest_rate || 0);
     const stellarSide = /xlm|cetes|ustry|dejaaa|dejtrsy/.test(collat + borrow);
+
+    // Templar is cross-chain (NEAR-settled); this is a Stellar dashboard and
+    // the card is labeled "TVL on Stellar" — only Stellar-side markets count
+    // toward the headline number. Non-Stellar markets stay listed for
+    // completeness but are excluded from the total.
+    if (stellarSide) totalTvl += tvl;
 
     pools.push({
       assets: [templarPretty(borrow), templarPretty(collat)],
@@ -685,7 +721,7 @@ async function fetchTemplar() {
         `Supply ${templarPretty(borrow)} to earn ${(supplyApy * 100).toFixed(2)}%; ` +
         `borrow against ${templarPretty(collat)} at ${(borrowApr * 100).toFixed(2)}% APR. ` +
         `$${Math.round(Number(entry.availableBalance || 0)).toLocaleString()} available to borrow.` +
-        (stellarSide ? " Stellar-side assets." : ""),
+        (stellarSide ? " Stellar-side assets." : " Non-Stellar deployment — excluded from Stellar TVL."),
       detail: {
         supplyApy, borrowApr,
         depositsUSD: borrowDepositsUSD,
@@ -749,7 +785,9 @@ async function fetchK2() {
     const suppliedUnits = (Number(aSupply) / denom) * liqIdx;
     const borrowedUnits = (Number(dSupply) / denom) * borIdx;
     let usd = null;
-    try { const p = await priceSorobanToken(asset, symbol); usd = p && p.usd != null ? p.usd : null; } catch (_) {}
+    // Second arg is an OPTIONS object ({ decimals }) — passing the symbol
+    // string silently defaulted decimals to 7 on aggregator-fallback pricing.
+    try { const p = await priceSorobanToken(asset, { decimals }); usd = p && p.usd != null ? p.usd : null; } catch (_) {}
     const suppliedUSD = usd != null ? suppliedUnits * usd : 0;
     const borrowedUSD = usd != null ? borrowedUnits * usd : 0;
     supplied += suppliedUSD;
@@ -796,14 +834,26 @@ async function fetchEtherfuse() {
   const pools = [];
   let totalTvl = 0;
 
-  // 1) Bond yields from the RWA feed (issuance APY per bond)
+  // 1) Bond yields from the RWA feed (issuance APY per bond).
+  // rwa-yields.json nests entries under the top-level "stats" key, slugged
+  // like "cetes-gcryug", with yield7d as a percent STRING ("4.88%") — there
+  // is no numeric apy field. Read fresh from disk (the yield fetcher
+  // rewrites the file at runtime; require() would serve a stale cache).
   let bondApy = {};
   try {
-    const rwa = require("./rwa-yields.json");
-    for (const [key, v] of Object.entries(rwa)) {
+    const fs = require("fs");
+    const path = require("path");
+    const rwa = JSON.parse(
+      fs.readFileSync(path.join(__dirname, "rwa-yields.json"), "utf8")
+    );
+    for (const [key, v] of Object.entries(rwa.stats || {})) {
       const up = key.toUpperCase();
       for (const s of ETHERFUSE_SYMBOLS) {
-        if (up.includes(s.toUpperCase()) && v && v.apy != null) bondApy[s.toUpperCase()] = Number(v.apy);
+        if (!up.startsWith(s.toUpperCase() + "-")) continue;
+        const raw = v && (v.apy ?? v.yield7d);
+        const pct = typeof raw === "string" ? parseFloat(raw) : typeof raw === "number" ? raw : NaN;
+        // fmtApy renders fractions (0.0488 → "4.88%")
+        if (Number.isFinite(pct)) bondApy[s.toUpperCase()] = pct / 100;
       }
     }
   } catch (_) {}
@@ -918,7 +968,10 @@ function getSnapshot(opts = {}) {
       // Fetchers keep ALL pools (sorted desc); the threshold is applied here
       // so the summary stays clean while detail pages can show everything.
       const sorted = [...(v.pools || [])].sort((a, b) => (b.tvlUSD || 0) - (a.tvlUSD || 0));
-      const visible = exempt ? sorted : sorted.filter((p) => (p.tvlUSD || 0) >= MIN_POOL_TVL_USD || p.reserves);
+      // The floor applies to EVERY non-exempt pool. (A blanket `|| p.reserves`
+      // exemption let permissionless dust/spam Blend pools into the default
+      // view — and into the index page's "Top APY" cell.)
+      const visible = exempt ? sorted : sorted.filter((p) => (p.tvlUSD || 0) >= MIN_POOL_TVL_USD);
       protocols.push({
         ...v,
         pools: includeAll ? sorted : visible,

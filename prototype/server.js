@@ -125,10 +125,18 @@ const { warmSoroswapUniverse } = require("./lib/adapters/lp-discovery");
 warmSoroswapUniverse().catch(() => {});
 setInterval(() => warmSoroswapUniverse().catch(() => {}), 50 * 60_000);
 
+// Last-known-good adapter results, keyed `${address}:${adapterName}`.
+// When an adapter times out or errors, we serve its recent result instead
+// of silently dropping the whole protocol from the portfolio — a user's
+// $50k LP position must not vanish for one refresh because an RPC was slow.
+const ADAPTER_STALE_TTL_MS = parseInt(process.env.ADAPTER_STALE_TTL_MS || "600000", 10); // 10 min
+const _adapterResultCache = new Map();
+
 async function collectDefiPositions(address, xlmPrice) {
   const defiPositions = [];
-  const defiByPool = []; // grouped data, currently from Blend
+  const defiByPool = []; // grouped data (Blend, K2, ...)
   let totalUSD = 0;
+  const degraded = []; // adapters that failed AND had no fresh fallback
 
   const configured = PROTOCOL_ADAPTERS.filter((a) => a.isConfigured());
   const results = await Promise.allSettled(
@@ -138,17 +146,34 @@ async function collectDefiPositions(address, xlmPrice) {
   );
 
   results.forEach((r, i) => {
-    if (r.status !== "fulfilled") {
-      console.error(`${configured[i].name || "adapter"} adapter error:`, r.reason?.message);
-      return;
+    const name = configured[i].name || "adapter";
+    const cacheKey = `${address}:${name}`;
+    let positions = null;
+    let stale = false;
+
+    if (r.status === "fulfilled") {
+      positions = r.value || [];
+      _adapterResultCache.set(cacheKey, { positions, ts: Date.now() });
+    } else {
+      const cached = _adapterResultCache.get(cacheKey);
+      if (cached && Date.now() - cached.ts < ADAPTER_STALE_TTL_MS) {
+        positions = cached.positions;
+        stale = true;
+        console.warn(`${name} adapter failed (${r.reason?.message}) — serving positions cached ${Math.round((Date.now() - cached.ts) / 1000)}s ago`);
+      } else {
+        degraded.push(name);
+        console.error(`${name} adapter error (no fresh fallback):`, r.reason?.message);
+        return;
+      }
     }
-    const positions = r.value || [];
+
     for (const pos of positions) {
       totalUSD += pos.valueUSD || 0;
-      defiPositions.push(pos);
+      defiPositions.push(stale ? { ...pos, stale: true } : pos);
     }
-    // Blend (and any future adapter) may attach grouped pool data via the
-    // __blendPoolGroups property — pass through for the per-pool table.
+    // Adapters may attach grouped pool data via the __blendPoolGroups
+    // property — pass through for the per-pool table. (Groups carry their
+    // own protocol id; "blend" is only the default for legacy groups.)
     if (Array.isArray(positions.__blendPoolGroups)) {
       for (const g of positions.__blendPoolGroups) {
         defiByPool.push({ protocol: "blend", ...g });
@@ -156,7 +181,7 @@ async function collectDefiPositions(address, xlmPrice) {
     }
   });
 
-  return { defiPositions, defiByPool, totalUSD };
+  return { defiPositions, defiByPool, totalUSD, degraded };
 }
 
 // ── Price Engine ──────────────────────────────────────────────────────────────
@@ -434,7 +459,7 @@ app.get("/api/v1/account/:address", async (req, res) => {
 
     // ── DeFi positions (SushiSwap V3, Solv vaults, etc.) ─────────────────
     // All protocol adapters queried in parallel with a per-adapter timeout.
-    const { defiPositions, defiByPool, totalUSD: defiTotalUSD } =
+    const { defiPositions, defiByPool, totalUSD: defiTotalUSD, degraded: defiDegraded } =
       await collectDefiPositions(address, xlmPrice);
     totalValueUSD += defiTotalUSD;
 
@@ -450,6 +475,7 @@ app.get("/api/v1/account/:address", async (req, res) => {
       balances,
       defiPositions,
       defiByPool,
+      defiDegraded,
       defiProtocols: PROTOCOL_ADAPTERS.filter((a) => a.isConfigured()).map((a) => ({
         id: a.protocolId,
         name: a.name,
@@ -1267,7 +1293,7 @@ app.post("/api/v1/portfolio", async (req, res) => {
         }
 
         // DeFi positions — all protocol adapters in parallel with timeouts
-        const { defiPositions, defiByPool, totalUSD: defiTotalUSD } =
+        const { defiPositions, defiByPool, totalUSD: defiTotalUSD, degraded: defiDegraded } =
           await collectDefiPositions(address, xlmPrice);
         walletTotalUSD += defiTotalUSD;
 
@@ -1286,6 +1312,10 @@ app.post("/api/v1/portfolio", async (req, res) => {
           balances,
           defiPositions,
           defiByPool,
+          // Protocols that failed with no recent fallback this request —
+          // lets the UI say "K2 temporarily unavailable" instead of
+          // silently showing a smaller net worth.
+          defiDegraded,
         });
 
         // Auto-snapshot
