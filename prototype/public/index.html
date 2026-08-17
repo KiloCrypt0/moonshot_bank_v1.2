@@ -6299,10 +6299,15 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
       const totalBorrowed = byPool.reduce((s, p) => s + (p.totalBorrowedUSD || 0), 0);
       const netDefiUSD = totalSupplied - totalBorrowed;
       const totalPendingBlnd = byPool.reduce((s, p) => s + (p.totalPendingBlnd || 0), 0);
-      const nonBlendValueUSD = positions
-        .filter(p => p.protocol !== "blend")
+      // Any protocol that supplied grouped pool data is already rendered as a
+      // per-pool table below; counting its flat rows again would double it.
+      // Derived from the payload rather than hardcoded — K2 (and any future
+      // grouped adapter) must be excluded here too, not just Blend.
+      const groupedProtocols = new Set(byPool.map((g) => g.protocol).filter(Boolean));
+      const ungroupedValueUSD = positions
+        .filter(p => !groupedProtocols.has(p.protocol))
         .reduce((s, p) => s + (p.valueUSD || 0), 0);
-      const netDefiTotal = netDefiUSD + nonBlendValueUSD;
+      const netDefiTotal = netDefiUSD + ungroupedValueUSD;
 
       let html = "";
 
@@ -6412,8 +6417,8 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         html += `</div>`;
       }
 
-      // ── Non-Blend positions (SushiSwap, Solv, etc.) ────────────────────
-      const otherPositions = positions.filter(p => p.protocol !== "blend");
+      // ── Ungrouped positions (SushiSwap, Solv, etc.) ────────────────────
+      const otherPositions = positions.filter(p => !groupedProtocols.has(p.protocol));
       otherPositions.forEach((pos) => {
         const protocolIcon = pos.protocol === "sushiswap-v3" ? "sushi"
           : pos.protocol === "solv-protocol" ? "solv"
