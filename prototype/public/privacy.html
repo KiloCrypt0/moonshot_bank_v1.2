@@ -35,7 +35,9 @@
 <p>Like most web services, the Service's hosting infrastructure may automatically record standard request logs (such as IP address, user agent, request timestamp, and requested path) for the purpose of operating, securing, and debugging the Service. These logs are retained only as long as reasonably necessary and are not used to build profiles of individual users.</p>
 
 <h2>5. Cookies and Tracking</h2>
-<p>The Service does not set advertising cookies and does not include third-party analytics or advertising trackers. Any local browser storage used (for example, to remember a saved wallet list during your session) is stored only in your own browser and is never transmitted to the Service operators.</p>
+<p>The Service does not set advertising cookies and does not include third-party analytics or advertising trackers. Your wallet list, including any labels you give your wallets, is stored in your own browser's local storage and is what the Service renders your portfolio from.</p>
+
+<p>To be precise about one thing this page previously got wrong: wallet addresses you add, and the labels you give them, <em>are</em> sent to the Service, because the Service records periodic value snapshots so it can show you a portfolio history. Those labels are not shown to other visitors. Everything else held in local browser storage — your selected theme, which wallet you last connected, and which tab you were on — stays in your browser.</p>
 
 <h2>6. Third-Party Services</h2>
 <p>The Service depends on third-party data providers, including the Stellar Horizon API and related public endpoints. When the Service queries these providers on your behalf, your IP address and the query parameters are visible to those providers, subject to their respective privacy practices.</p>

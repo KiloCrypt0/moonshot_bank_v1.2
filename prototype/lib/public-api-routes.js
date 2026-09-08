@@ -10,21 +10,14 @@ const path = require("path");
 const profiles = require("./public-profiles");
 const historyDb = require("./history-db");
 const profileAuth = require("./profile-auth");
+const { cleanLabel, cleanDisplayName, cleanBio, cleanEmoji } = require("./sanitize");
 
-// Escape user-controlled strings before injecting into server-rendered HTML.
-// The profile page renders displayName/bio/avatarEmoji directly into the DOM
-// and shares an origin with the main SPA (which stores Freighter wallet-
-// connection state) — unescaped output here is a wallet-hijack surface, not
-// just cosmetic XSS.
-function htmlEscape(s) {
-  if (s == null) return "";
-  return String(s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
+// NOTE: this module used to define an htmlEscape() that nothing called. It was
+// left behind when GET /p/:slug stopped rendering HTML server-side and became
+// res.sendFile(index.html). A named escaper with zero call sites invites the
+// assumption that the server escapes profile fields — it does not, and must not
+// be relied on to. Profile text is filtered at write time (lib/sanitize.js) and
+// escaped by the SPA at render time.
 
 function createRouter(fetchPortfolioFn) {
   const router = express.Router();
@@ -99,7 +92,10 @@ function createRouter(fetchPortfolioFn) {
   });
 
   // Helper: given a request body containing { challengeToken, signature }
-  // and an expected (address, action, slug), verify the challenge or throw.
+  // and an expected (address, action, slug, target), verify the challenge or
+  // throw. Every profile route funnels through here, so `target` MUST be
+  // forwarded — verifyAndConsume compares it unconditionally, and passing
+  // nothing means "this action has no target", not "don't check".
   function requireSignedChallenge({ challengeToken, signature }, expected) {
     if (!challengeToken || !signature) {
       throw new Error("challengeToken and signature required");
@@ -110,23 +106,52 @@ function createRouter(fetchPortfolioFn) {
       signatureBase64: signature,
       expectedAction: expected.action,
       expectedSlug: expected.slug,
+      expectedTarget: expected.target ?? null,
     });
   }
 
-  // Helper: verify the caller controls at least one wallet on the profile,
-  // for actions that operate on the profile as a whole (patch / delete).
-  function requireProfileControl(slug, body, action) {
+  function _loadProfileOr404(slug) {
     const profile = profiles.getProfile(slug);
     if (!profile) { const err = new Error("Profile not found"); err.status = 404; throw err; }
+    return profile;
+  }
+
+  // Verify the caller controls at least one wallet ON the profile. Used for
+  // edits (PATCH). This is only safe because joining a profile now requires the
+  // owner's consent — previously anyone could attach their own wallet with a
+  // single self-signed challenge and thereby pass this check.
+  function requireProfileControl(slug, body, action) {
+    const profile = _loadProfileOr404(slug);
     const currentAddresses = new Set((profile.wallets || []).map(w => w.address));
     if (currentAddresses.size === 0) {
-      throw new Error("Profile has no wallets; cannot verify control");
+      const err = new Error("Profile has no wallets; cannot verify control");
+      err.status = 409;
+      throw err;
     }
     const { challengeToken, signature, address } = body || {};
     if (!address || !currentAddresses.has(address)) {
       throw new Error("address must be one of the profile's current wallets");
     }
-    requireSignedChallenge({ challengeToken, signature }, { address, action, slug });
+    requireSignedChallenge({ challengeToken, signature }, { address, action, slug, target: null });
+    return profile;
+  }
+
+  // Verify the caller controls the profile's OWNER wallet — the one that
+  // created it. Required for destructive and membership-changing actions.
+  function requireProfileOwner(slug, body, action, target = null) {
+    const profile = _loadProfileOr404(slug);
+    if (!profile.ownerAddress) {
+      // Only reachable for a pre-ownership profile that has no wallets at all.
+      // 409, not 400: the request is fine, the record is not.
+      const err = new Error("Profile has no recorded owner; attach a wallet before managing it");
+      err.status = 409;
+      throw err;
+    }
+    const { challengeToken, signature, address } = body || {};
+    if (!address || address !== profile.ownerAddress) {
+      throw new Error("Only the profile owner can perform this action");
+    }
+    requireSignedChallenge({ challengeToken, signature }, { address, action, slug, target });
     return profile;
   }
 
@@ -144,7 +169,9 @@ function createRouter(fetchPortfolioFn) {
   router.post("/api/v1/profiles", (req, res) => {
     try {
       const { slug, displayName, bio, avatarEmoji, wallets, showBalances, showDefi, showHistory } = req.body || {};
-      if (!slug || !displayName) return res.status(400).json({ error: "slug and displayName are required" });
+      if (!slug || !cleanDisplayName(displayName)) {
+        return res.status(400).json({ error: "slug and displayName are required" });
+      }
       if (!Array.isArray(wallets) || wallets.length === 0) {
         return res.status(400).json({ error: "At least one signed wallet claim is required to create a profile" });
       }
@@ -155,14 +182,23 @@ function createRouter(fetchPortfolioFn) {
         if (!w || !w.address) return res.status(400).json({ error: "Each wallet must include an address" });
         requireSignedChallenge(
           { challengeToken: w.challengeToken, signature: w.signature },
-          { address: w.address, action: "create-profile", slug }
+          { address: w.address, action: "create-profile", slug, target: null }
         );
       }
 
-      const profile = profiles.createProfile(slug, displayName, { bio, avatarEmoji, showBalances, showDefi, showHistory });
-      for (const w of wallets) {
-        profiles.addWalletToProfile(profile.slug, w.address, w.label || null);
-      }
+      // The first claimed wallet becomes the owner. Its create-profile
+      // signature is what roots the profile's whole trust chain: every later
+      // membership change requires this wallet's consent.
+      const profile = profiles.createProfileWithWallets(
+        slug,
+        cleanDisplayName(displayName),
+        {
+          bio: cleanBio(bio),
+          avatarEmoji: cleanEmoji(avatarEmoji),
+          showBalances, showDefi, showHistory,
+        },
+        wallets.map((w) => ({ address: w.address, label: cleanLabel(w.label) }))
+      );
       res.json({ message: "Profile created!", url: `/p/${profile.slug}`, ...profiles.getProfile(profile.slug) });
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
@@ -188,8 +224,11 @@ function createRouter(fetchPortfolioFn) {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  // Check the SLUGIFIED form, not the raw string: createProfile slugifies, so
+  // "My Name" reported available and then collided with an existing "my-name".
   router.get("/api/v1/profiles/check/:slug", (req, res) => {
-    res.json({ slug: req.params.slug, available: profiles.isSlugAvailable(req.params.slug) });
+    const slug = profiles.slugify(req.params.slug);
+    res.json({ slug, available: !!slug && slug.length >= 2 && profiles.isSlugAvailable(slug) });
   });
 
   // Patch requires signature from any wallet currently on the profile.
@@ -204,42 +243,92 @@ function createRouter(fetchPortfolioFn) {
     } catch (e) { res.status(e.status || 400).json({ error: e.message }); }
   });
 
+  // Deleting a profile is owner-only — it is the one irreversible action here.
   router.delete("/api/v1/profiles/:slug", (req, res) => {
     try {
-      requireProfileControl(req.params.slug, req.body, "delete-profile");
+      requireProfileOwner(req.params.slug, req.body, "delete-profile");
       profiles.deleteProfile(req.params.slug);
       res.json({ message: "Profile deleted" });
     } catch (e) { res.status(e.status || 400).json({ error: e.message }); }
   });
 
-  // Adding a wallet requires signature from the wallet being ADDED (proves
-  // control of the new wallet) — not from an existing profile wallet.
+  // Adding a wallet requires TWO signatures, both verified before any write:
+  //
+  //   1. the profile OWNER consents, over a message that names the exact
+  //      address being added (so the consent cannot be replayed for another);
+  //   2. the wallet BEING ADDED proves it is controlled by the caller.
+  //
+  // Requirement 1 is what closes the takeover: previously a single self-signed
+  // challenge from an arbitrary wallet was enough to join any profile, and
+  // membership was sufficient to rename, re-point or delete it.
+  //
+  // A UI for this does not exist yet. When it is built it needs two steps —
+  // the owner signs the authorization, then the user connects the wallet being
+  // added and signs the claim — because the wallet kit holds one connected
+  // wallet at a time.
   router.post("/api/v1/profiles/:slug/wallets", (req, res) => {
     try {
-      const { address, label, challengeToken, signature } = req.body || {};
+      const { address, label, ownerAuth, walletClaim } = req.body || {};
       if (!address) return res.status(400).json({ error: "address is required" });
-      requireSignedChallenge(
-        { challengeToken, signature },
-        { address, action: "add-wallet", slug: req.params.slug }
+      // The added wallet is no longer validated as a side effect of
+      // Keypair.fromPublicKey() inside verifyAndConsume, because one of the two
+      // signers is the owner. Validate it explicitly.
+      if (!profileAuth._isValidStellarAddress(address)) {
+        return res.status(400).json({ error: "Invalid Stellar address" });
+      }
+      if (!ownerAuth || !walletClaim) {
+        return res.status(400).json({
+          error: "Both ownerAuth (owner consent) and walletClaim (proof of control of the new wallet) are required",
+        });
+      }
+
+      const profile = requireProfileOwner(
+        req.params.slug, ownerAuth, "authorize-add-wallet", address
       );
-      profiles.addWalletToProfile(req.params.slug, address, label);
+      if ((profile.wallets || []).some((w) => w.address === address)) {
+        return res.status(409).json({ error: "That wallet is already on this profile" });
+      }
+      requireSignedChallenge(walletClaim, {
+        address,
+        action: "claim-wallet",
+        slug: req.params.slug,
+        target: address,
+      });
+
+      profiles.addWalletToProfile(req.params.slug, address, cleanLabel(label));
       res.json({ message: "Wallet added" });
-    } catch (e) { res.status(400).json({ error: e.message }); }
+    } catch (e) { res.status(e.status || 400).json({ error: e.message }); }
   });
 
-  // Removing a wallet requires signature from the wallet being REMOVED
-  // (only its controller can pull it off a profile).
+  // Removing a wallet accepts a signature from EITHER the profile owner or the
+  // wallet being removed — the owner curates the profile, and the controller of
+  // a wallet must always be able to pull it off someone else's page. Both are
+  // bound to the address being removed.
+  //
+  // The owner's own address cannot be removed here: it would leave the profile
+  // with no owner, i.e. unmanageable and undeletable.
   router.delete("/api/v1/profiles/:slug/wallets", (req, res) => {
     try {
       const { address, challengeToken, signature } = req.body || {};
       if (!address) return res.status(400).json({ error: "address is required" });
+      const profile = _loadProfileOr404(req.params.slug);
+      if (address === profile.ownerAddress) {
+        return res.status(400).json({
+          error: "Cannot remove the profile's owner wallet — delete the profile instead (DELETE /api/v1/profiles/:slug)",
+        });
+      }
+
+      const signer = (req.body || {}).signerAddress || address;
+      if (signer !== address && signer !== profile.ownerAddress) {
+        return res.status(400).json({ error: "Only the profile owner or the wallet itself can remove it" });
+      }
       requireSignedChallenge(
         { challengeToken, signature },
-        { address, action: "remove-wallet", slug: req.params.slug }
+        { address: signer, action: "remove-wallet", slug: req.params.slug, target: address }
       );
       profiles.removeWalletFromProfile(req.params.slug, address);
       res.json({ message: "Wallet removed" });
-    } catch (e) { res.status(400).json({ error: e.message }); }
+    } catch (e) { res.status(e.status || 400).json({ error: e.message }); }
   });
 
   router.get("/api/v1/profiles/:slug/portfolio", async (req, res) => {
@@ -346,12 +435,12 @@ a{color:var(--accent)}
 
 <h2>Example</h2>
 <pre>// Fetch any wallet — no key needed
-fetch("https://moonshotbank-production.up.railway.app/api/v1/public/account/GABC...XYZ")
+fetch("https://stellarscope.xyz/api/v1/public/account/GABC...XYZ")
   .then(r => r.json())
   .then(data => console.log(data.totalValueUSD));</pre>
 
 <pre>// cURL
-curl https://moonshotbank-production.up.railway.app/api/v1/public/account/GABC...XYZ</pre>
+curl https://stellarscope.xyz/api/v1/public/account/GABC...XYZ</pre>
 </div></body></html>`);
   });
 

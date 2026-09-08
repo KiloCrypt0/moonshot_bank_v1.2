@@ -87,7 +87,11 @@ async function tick() {
         const portfolioData = await _fetchPortfolio(wallet.address, wallet.network || "mainnet");
 
         if (portfolioData) {
-          historyDb.recordSnapshot(portfolioData, wallet.network || "mainnet");
+          // autoTrack: the scheduler only ever iterates wallets that are
+          // already tracked, so this is a no-op in practice — but it is the
+          // caller that legitimately owns the enrolment decision, so it opts in
+          // explicitly rather than relying on recordSnapshot's default.
+          historyDb.recordSnapshot(portfolioData, wallet.network || "mainnet", { autoTrack: true });
           _stats.totalSnapshotsTaken++;
           processed++;
         }
@@ -110,6 +114,15 @@ async function tick() {
   }
 }
 
+// tick()'s getTrackedWallets() sits inside a try/finally with no catch, and
+// both call sites below used to discard the returned promise — so a SQLITE_BUSY
+// there became an unhandled rejection that killed the process.
+function _onTickError(e) {
+  console.error("[Scheduler] Tick failed:", e && e.message ? e.message : e);
+  _stats.errors++;
+  _stats.lastError = { message: e && e.message ? e.message : String(e), at: new Date().toISOString() };
+}
+
 /**
  * Start the background scheduler.
  * @param {number} tickIntervalMs - How often to check for due wallets (default: 60s)
@@ -124,9 +137,9 @@ function start(tickIntervalMs = DEFAULT_TICK_INTERVAL) {
   console.log(`[Scheduler] Tier intervals — free: 1h, basic: 30m, pro: 15m, premium: 5m`);
 
   // Run first tick after a short delay (let server finish starting)
-  setTimeout(() => tick(), 10_000);
+  setTimeout(() => tick().catch(_onTickError), 10_000);
 
-  _interval = setInterval(() => tick(), tickIntervalMs);
+  _interval = setInterval(() => tick().catch(_onTickError), tickIntervalMs);
 }
 
 /**
@@ -144,9 +157,17 @@ function stop() {
  * Get scheduler stats.
  */
 function getStats() {
+  // lastError used to carry the wallet address it failed on. This is served
+  // unauthenticated from /api/v1/scheduler/stats, so it handed out another
+  // user's tracked address — the same class of cross-user leak the wallet-list
+  // and portfolio routes were already fixed for. Message and timestamp only.
+  const { lastError, ...rest } = _stats;
   return {
     running: !!_interval,
-    ..._stats,
+    ...rest,
+    lastError: lastError
+      ? { message: lastError.message, at: lastError.at }
+      : null,
     tierIntervals: Object.fromEntries(
       Object.entries(TIER_INTERVALS).map(([k, v]) => [k, `${v / 60000} min`])
     ),

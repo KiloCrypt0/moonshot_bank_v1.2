@@ -9,6 +9,7 @@
  */
 const Database = require("better-sqlite3");
 const path = require("path");
+const { cleanLabel } = require("./sanitize");
 
 const DB_PATH = process.env.HISTORY_DB_PATH || path.join(__dirname, "..", "data", "history.db");
 
@@ -22,8 +23,14 @@ const db = new Database(DB_PATH);
 db.pragma("journal_mode = WAL");
 
 // ── Schema ────────────────────────────────────────────────────────────────────
+//
+// Exported as plain functions so tests can run them against a scratch database
+// and assert they are idempotent. Re-requiring this module to re-run them is not
+// an option: `require` is cached, and busting the cache opens a second
+// better-sqlite3 connection to the same file while the first is still live.
 
-db.exec(`
+function runMigrations(database = db) {
+  database.exec(`
   CREATE TABLE IF NOT EXISTS tracked_wallets (
     address TEXT PRIMARY KEY,
     network TEXT NOT NULL DEFAULT 'mainnet',
@@ -88,25 +95,106 @@ db.exec(`
     WHERE last_nonzero_at IS NOT NULL;
 `);
 
-// Migration: add tier column if upgrading from an older schema
-try {
-  db.prepare("SELECT tier FROM tracked_wallets LIMIT 1").get();
-} catch (e) {
-  db.exec("ALTER TABLE tracked_wallets ADD COLUMN tier TEXT NOT NULL DEFAULT 'free'");
-  console.log("[history-db] Migrated: added tier column to tracked_wallets");
+  // Migration: add tier column if upgrading from an older schema
+  try {
+    database.prepare("SELECT tier FROM tracked_wallets LIMIT 1").get();
+  } catch (e) {
+    database.exec("ALTER TABLE tracked_wallets ADD COLUMN tier TEXT NOT NULL DEFAULT 'free'");
+    console.log("[history-db] Migrated: added tier column to tracked_wallets");
+  }
+
+  // Bookkeeping for one-shot data migrations — see runBackfills().
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS schema_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT,
+      applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
 }
+
+function _backfillHasRun(database, key) {
+  return !!database.prepare("SELECT 1 FROM schema_meta WHERE key = ?").get(key);
+}
+
+function _markBackfillRun(database, key, value = "1") {
+  database
+    .prepare("INSERT OR REPLACE INTO schema_meta (key, value) VALUES (?, ?)")
+    .run(key, String(value));
+}
+
+/**
+ * One-shot data migrations. Each is gated on a schema_meta row so it runs once
+ * per database, not on every boot. Idempotent: safe to call repeatedly.
+ */
+function runBackfills(database = db) {
+  // Labels stored before write-time filtering existed. See the note in
+  // public-profiles' runBackfills: this only rewrites genuinely unsafe or
+  // over-long values, and logs each change with its previous value.
+  if (!_backfillHasRun(database, "tracked_wallet_labels_filtered")) {
+    const rows = database.prepare(
+      "SELECT address, label FROM tracked_wallets WHERE label IS NOT NULL"
+    ).all();
+    const update = database.prepare("UPDATE tracked_wallets SET label = ? WHERE address = ?");
+    let changed = 0;
+    for (const row of rows) {
+      const cleaned = cleanLabel(row.label);
+      if (cleaned !== row.label) {
+        console.log(`[history-db] Backfill: tracked_wallets.label ${row.address.slice(0, 8)}… ${JSON.stringify(row.label)} -> ${JSON.stringify(cleaned)}`);
+        update.run(cleaned, row.address);
+        changed++;
+      }
+    }
+    if (changed) console.log(`[history-db] Backfill: filtered ${changed} tracked wallet label(s)`);
+    _markBackfillRun(database, "tracked_wallet_labels_filtered");
+  }
+
+  // Correction to the hardening review, which said foreign_keys "is never
+  // turned on so the FK constraints are decorative": better-sqlite3 enables the
+  // pragma by DEFAULT, so they have always been enforced (verified against
+  // 72d69b4: `db.pragma("foreign_keys")` reads 1). This sweep is therefore a
+  // cheap no-op safety net rather than a prerequisite — kept because an orphan
+  // would break the retention delete, and it costs one query per database.
+  if (!_backfillHasRun(database, "orphan_snapshots_cleaned")) {
+    const orphanSnapshots = database.prepare(`
+      DELETE FROM portfolio_snapshots
+      WHERE address NOT IN (SELECT address FROM tracked_wallets)
+    `).run();
+    const orphanTokens = database.prepare(`
+      DELETE FROM token_snapshots
+      WHERE snapshot_id NOT IN (SELECT id FROM portfolio_snapshots)
+    `).run();
+    if (orphanSnapshots.changes || orphanTokens.changes) {
+      console.log(
+        `[history-db] Backfill: removed ${orphanSnapshots.changes} orphaned snapshot(s) ` +
+        `and ${orphanTokens.changes} orphaned token row(s) before enabling foreign_keys`
+      );
+    }
+    _markBackfillRun(database, "orphan_snapshots_cleaned");
+  }
+}
+
+runMigrations();
+runBackfills();
 
 // ── Prepared Statements ───────────────────────────────────────────────────────
 
 const stmts = {
+  // NOTE: this deliberately does NOT set tracking_enabled = 1 on conflict.
+  // It used to, which meant any request that touched a wallet row silently
+  // undid a user's untrackWallet() — including an anonymous POST /portfolio.
+  // trackWallet() re-enables tracking explicitly when that is the intent.
   upsertWallet: db.prepare(`
-    INSERT INTO tracked_wallets (address, network, label, tier)
-    VALUES (@address, @network, @label, @tier)
+    INSERT INTO tracked_wallets (address, network, label, tier, tracking_enabled)
+    VALUES (@address, @network, @label, @tier, 1)
     ON CONFLICT(address) DO UPDATE SET
       network = @network,
       label = COALESCE(@label, tracked_wallets.label),
-      tier = COALESCE(@tier, tracked_wallets.tier),
-      tracking_enabled = 1
+      tier = COALESCE(@tier, tracked_wallets.tier)
+  `),
+
+  enableTracking: db.prepare(`
+    UPDATE tracked_wallets SET tracking_enabled = 1 WHERE address = ?
   `),
 
   disableTracking: db.prepare(`
@@ -178,6 +266,18 @@ const stmts = {
     SELECT COUNT(*) as count FROM portfolio_snapshots WHERE address = ?
   `),
 
+  // token_snapshots.snapshot_id references portfolio_snapshots(id) with NO
+  // "ON DELETE CASCADE", and better-sqlite3 enables foreign_keys by default, so
+  // deleting a parent snapshot that still has token rows raises
+  // SQLITE_CONSTRAINT_FOREIGNKEY. Children first, always.
+  deleteOldTokenSnapshots: db.prepare(`
+    DELETE FROM token_snapshots
+    WHERE snapshot_id IN (
+      SELECT id FROM portfolio_snapshots
+       WHERE address = ? AND snapshot_at < datetime('now', ?)
+    )
+  `),
+
   deleteOldSnapshots: db.prepare(`
     DELETE FROM portfolio_snapshots
     WHERE address = ? AND snapshot_at < datetime('now', ?)
@@ -227,11 +327,27 @@ const stmts = {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
+const VALID_TIERS = ["free", "basic", "pro", "premium"];
+const ADDRESS_RE = /^G[A-Z2-7]{55}$/;
+
 /**
  * Start tracking a wallet address.
+ *
+ * Validation lives here rather than only at the route boundary: three separate
+ * routes reached this function, none of them validated the tier, and two wrote
+ * an arbitrary label onto an arbitrary address. Guarding the data layer means a
+ * future route cannot reintroduce that.
  */
 function trackWallet(address, network = "mainnet", label = null, tier = "free") {
-  stmts.upsertWallet.run({ address, network, label, tier });
+  if (!ADDRESS_RE.test(String(address || ""))) {
+    throw new Error("Invalid Stellar address");
+  }
+  const cleanTier = tier == null ? "free" : String(tier);
+  if (!VALID_TIERS.includes(cleanTier)) {
+    throw new Error(`Invalid tier: ${cleanTier}. Use: ${VALID_TIERS.join(", ")}`);
+  }
+  stmts.upsertWallet.run({ address, network, label: cleanLabel(label), tier: cleanTier });
+  stmts.enableTracking.run(address);
 }
 
 /**
@@ -239,8 +355,7 @@ function trackWallet(address, network = "mainnet", label = null, tier = "free") 
  * Tiers: "free" (1h), "basic" (30m), "pro" (15m), "premium" (5m)
  */
 function setTier(address, tier) {
-  const validTiers = ["free", "basic", "pro", "premium"];
-  if (!validTiers.includes(tier)) throw new Error(`Invalid tier: ${tier}. Use: ${validTiers.join(", ")}`);
+  if (!VALID_TIERS.includes(tier)) throw new Error(`Invalid tier: ${tier}. Use: ${VALID_TIERS.join(", ")}`);
   db.prepare("UPDATE tracked_wallets SET tier = ? WHERE address = ?").run(tier, address);
 }
 
@@ -268,12 +383,20 @@ function getTrackedWallets() {
 /**
  * Record a portfolio snapshot.
  * Call this with the same data structure returned by the /api/v1/account endpoint.
+ *
+ * `autoTrack` defaults to FALSE. It used to be unconditional, which meant every
+ * anonymous POST /api/v1/portfolio permanently enrolled whatever addresses it
+ * was given into the hourly snapshot scheduler — an unauthenticated write that
+ * altered data about someone else's wallet. Callers that legitimately own the
+ * enrolment decision (the scheduler, an explicit add-wallet) opt in.
  */
-function recordSnapshot(portfolioData, network = "mainnet") {
+function recordSnapshot(portfolioData, network = "mainnet", { autoTrack = false } = {}) {
   const address = portfolioData.address;
+  if (!ADDRESS_RE.test(String(address || ""))) {
+    throw new Error("Invalid Stellar address");
+  }
 
-  // Ensure wallet is tracked
-  trackWallet(address, network);
+  if (autoTrack) trackWallet(address, network);
 
   // Find XLM balance
   const xlmBal = portfolioData.balances?.find((b) => b.type === "native");
@@ -394,7 +517,12 @@ function getSnapshotCount(address) {
  * Clean up old snapshots beyond a retention period.
  */
 function cleanupOldSnapshots(address, retentionDays = 365) {
-  stmts.deleteOldSnapshots.run(address, `-${retentionDays} days`);
+  const window = `-${Math.max(1, Number(retentionDays) || 365)} days`;
+  const run = db.transaction(() => {
+    stmts.deleteOldTokenSnapshots.run(address, window);
+    stmts.deleteOldSnapshots.run(address, window);
+  });
+  run();
 }
 
 /**
@@ -405,14 +533,26 @@ function cleanupOldSnapshots(address, retentionDays = 365) {
  *
  * Call this periodically (e.g., daily) to prune storage.
  */
-function downsample(address, { fullResDays = 30, maxDays = 365 } = {}) {
-  // Step 1: Delete ancient data
+function downsample(address, options = {}) {
+  // These bounds are load-bearing, not defensive style. This function was
+  // reachable through an unauthenticated POST /api/v1/history/downsample, and
+  // {fullResDays:0, maxDays:0} made step 1 delete every snapshot older than
+  // "now" — i.e. all of them — for every tracked wallet. The route is gone; the
+  // clamp means re-adding a caller can never turn it back into a wipe.
+  //
+  // Both bounds need a floor. Clamping only fullResDays leaves
+  // {fullResDays:-1, maxDays:1} deleting everything older than 24 hours.
+  const fullResDays = Math.min(365, Math.max(7, Number(options.fullResDays) || 30));
+  const maxDays = Math.max(fullResDays + 1, Math.max(30, Number(options.maxDays) || 365));
+
+  // Step 1: Delete ancient data — token rows first (see deleteOldTokenSnapshots).
+  stmts.deleteOldTokenSnapshots.run(address, `-${maxDays} days`);
   stmts.deleteOldSnapshots.run(address, `-${maxDays} days`);
 
   // Step 2: For data between fullResDays and maxDays, keep only one snapshot per day
   // (keep the one closest to midnight UTC for each day)
-  const downsampleStmt = db.prepare(`
-    DELETE FROM portfolio_snapshots
+  const selectDownsampled = `
+    SELECT id FROM portfolio_snapshots
     WHERE address = ?
       AND snapshot_at < datetime('now', ?)
       AND snapshot_at >= datetime('now', ?)
@@ -427,24 +567,40 @@ function downsample(address, { fullResDays = 30, maxDays = 365 } = {}) {
             AND snapshot_at >= datetime('now', ?)
         ) WHERE rn = 1
       )
-  `);
+  `;
 
-  const result = downsampleStmt.run(
+  const params = [
     address,
     `-${fullResDays} days`,
     `-${maxDays} days`,
     address,
     `-${fullResDays} days`,
-    `-${maxDays} days`
-  );
+    `-${maxDays} days`,
+  ];
 
-  // Also clean up orphaned token snapshots
+  // Same child-before-parent ordering, in one transaction so a failure can't
+  // leave token rows pointing at snapshots that are already gone.
+  const deleteTokens = db.prepare(
+    `DELETE FROM token_snapshots WHERE snapshot_id IN (${selectDownsampled})`
+  );
+  const deleteSnapshots = db.prepare(
+    `DELETE FROM portfolio_snapshots WHERE id IN (${selectDownsampled})`
+  );
+  const run = db.transaction(() => {
+    deleteTokens.run(...params);
+    return deleteSnapshots.run(...params).changes;
+  });
+  const deletedRows = run();
+
+  // Belt and braces: sweep any token row whose parent is already gone. This
+  // used to be the ONLY cleanup, and it ran after the parent delete — too late
+  // to prevent the constraint failure it was presumably meant to avoid.
   db.prepare(`
     DELETE FROM token_snapshots
     WHERE snapshot_id NOT IN (SELECT id FROM portfolio_snapshots)
   `).run();
 
-  return { deletedRows: result.changes };
+  return { deletedRows };
 }
 
 /**
@@ -463,6 +619,15 @@ function downsampleAll(options) {
 /**
  * Get DB stats.
  */
+/**
+ * DB stats for /api/health and /api/v1/history/stats.
+ *
+ * dbPath is deliberately NOT included. It used to be, and BOTH of those routes
+ * are unauthenticated, so the container's filesystem layout was public. The
+ * resolved path is logged once at boot instead, where the deploy logs can show
+ * it — which is also where you check that a Railway volume mount actually took
+ * effect.
+ */
 function getStats() {
   const walletCount = db.prepare("SELECT COUNT(*) as c FROM tracked_wallets WHERE tracking_enabled = 1").get().c;
   const snapshotCount = db.prepare("SELECT COUNT(*) as c FROM portfolio_snapshots").get().c;
@@ -472,11 +637,15 @@ function getStats() {
     totalSnapshots: snapshotCount,
     dbSizeBytes: dbSize,
     dbSizeMB: (dbSize / 1024 / 1024).toFixed(2),
-    dbPath: DB_PATH,
   };
 }
 
 module.exports = {
+  DB_PATH,
+  runMigrations,
+  runBackfills,
+  _backfillHasRun,
+  _markBackfillRun,
   trackWallet,
   untrackWallet,
   setTier,

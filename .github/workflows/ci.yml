@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        # The real lockfile lives in prototype/. The repo root has a 143-byte
+        # stub lock for a package with no dependencies.
+        working-directory: prototype
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: prototype/package-lock.json
+      - run: npm ci
+      - run: npm test
+      # Gate on what actually ships. --omit=dev matters here: the Stellar
+      # Wallets Kit is a BUILD-time dependency (the browser gets the committed
+      # bundle in public/vendor), and its multi-chain tree carries advisories
+      # from Coinbase/Solana/NEAR packages that no shipped code imports.
+      # Auditing everything would fail the build on code that is neither
+      # deployed nor bundled.
+      - run: npm audit --omit=dev --audit-level=high
+      # Advisory: report the build-time tree too, without failing on it.
+      - run: npm audit --audit-level=high || true
+      # The committed vendor bundle must match the pinned source. A drifted
+      # bundle is the failure mode that looks fine until someone opens the
+      # wallet picker.
+      - run: npm run build:vendor && git diff --exit-code -- public/vendor

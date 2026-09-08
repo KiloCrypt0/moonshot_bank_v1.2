@@ -40,28 +40,52 @@
     Freighter, Albedo, LOBSTR, Hana, Rabet directly via named buttons, and
     falls back to its built-in modal for the same set (xBull is currently
     disabled — see the module-level comment for why). The kit is loaded as
-    ESM from esm.sh; the inline page script below stays a classic script and
-    uses window.connectWalletById / window.connectWalletViaModal which this
-    module installs on window.
+    ESM from a self-hosted bundle; the inline page script below stays a classic
+    script and uses window.connectWalletById / window.connectWalletViaModal
+    which this module installs on window.
   -->
   <script type="module">
-    // Freighter + LOBSTR use ?bundle because their underlying npm packages
-    // only expose a default export on esm.sh, while the kit imports named
-    // members from them. Without ?bundle the module fails with a
-    // SyntaxError and every wallet button stops working.
+    // SELF-HOSTED. This used to be six live imports from
+    // https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0?bundle — the code
+    // that runs fetchAddress() and signMessage(), fetched from a third party on
+    // every page load, with `?bundle` meaning that third party resolved the
+    // transitive dependency graph at request time. The bytes were never pinned,
+    // and a hijacked response could serve a fake wallet modal to every visitor.
+    //
+    // Now built from the version pinned in package.json:
+    //   npm run build:vendor   (see vendor-src/stellar-wallets-kit.entry.js)
+    //
+    // Note on SRI: `integrity` cannot be applied to an ES module specifier, only
+    // to a classic <script src> or a <link>. Merging this module block into the
+    // classic script below to get SRI is NOT an option — this block declares
+    // `const CONNECTED_ADDR_KEY` (see below) which the classic block declares
+    // again, deliberately, because module scope hides the first. Two const
+    // declarations in one scope is a SyntaxError that would abort parsing of the
+    // entire 4000-line page script. Self-hosting is the fix that matters here;
+    // the file is served from our own origin under script-src 'self'.
     //
     // xBull is intentionally not loaded: @creit.tech/xbull-wallet-connect
-    // imports `encodeUTF8` as a named member of tweetnacl-util (which only
-    // ships a default export on esm.sh), and its ?bundle URL returns
-    // HTTP 500 because esbuild can't resolve a tslib helper. Until there's
-    // a workable CDN setup or self-hosted bundle, xBull users can paste
-    // their G-address into the wallet panel manually.
-    import { StellarWalletsKit, Networks } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0?bundle";
-    import { FreighterModule, FREIGHTER_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/freighter?bundle";
-    import { LobstrModule, LOBSTR_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/lobstr?bundle";
-    import { AlbedoModule, ALBEDO_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/albedo";
-    import { HanaModule, HANA_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/hana";
-    import { RabetModule, RABET_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/rabet";
+    // imports `encodeUTF8` as a named member of tweetnacl-util, which only
+    // ships a default export, and it could not be bundled cleanly. xBull users
+    // can paste their G-address into the wallet panel manually.
+    //
+    // ROLLBACK: to go back to the CDN, restore these six lines
+    //   import { StellarWalletsKit, Networks } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0?bundle";
+    //   import { FreighterModule, FREIGHTER_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/freighter?bundle";
+    //   import { LobstrModule, LOBSTR_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/lobstr?bundle";
+    //   import { AlbedoModule, ALBEDO_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/albedo";
+    //   import { HanaModule, HANA_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/hana";
+    //   import { RabetModule, RABET_ID } from "https://esm.sh/@creit.tech/stellar-wallets-kit@2.3.0/modules/rabet";
+    // AND add https://esm.sh to script-src in the CSP (lib/security-headers.js),
+    // or the imports are blocked with no visible error.
+    import {
+      StellarWalletsKit, Networks,
+      FreighterModule, FREIGHTER_ID,
+      LobstrModule, LOBSTR_ID,
+      AlbedoModule, ALBEDO_ID,
+      HanaModule, HANA_ID,
+      RabetModule, RABET_ID,
+    } from "/vendor/stellar-wallets-kit-2.3.0.js";
 
     StellarWalletsKit.init({
       network: Networks.PUBLIC,
@@ -3730,16 +3754,33 @@
         showDefi: !!profile.showDefi,
         showHistory: !!profile.showHistory,
         wallets: profile.wallets || [],
-        signingAddress: cpState.wallet?.address || (profile.wallets?.[0]?.address ?? null),
+        ownerAddress: profile.ownerAddress || null,
+        // The connected wallet, and only the connected wallet, can sign. The
+        // old fallback to profile.wallets[0] produced a challenge bound to an
+        // address the user could not sign for, so every save failed with an
+        // opaque "Challenge does not match address".
+        signingAddress: cpState.wallet?.address || null,
+        isOwner: !!cpState.wallet?.address && cpState.wallet.address === profile.ownerAddress,
+        isMember: (profile.wallets || []).some(w => w.address === cpState.wallet?.address),
         saving: false,
         deleteConfirmText: "",
       };
 
       const walletList = mpState.wallets.map(w => `
         <div class="cp-wallet-pill" style="margin:4px 4px 0 0" title="${escapeHtml(w.address)}">
-          ${w.label ? escapeHtml(w.label) + " · " : ""}${w.address.slice(0, 8)}…${w.address.slice(-6)}
+          ${w.label ? escapeHtml(w.label) + " · " : ""}${w.address.slice(0, 8)}…${w.address.slice(-6)}${w.address === mpState.ownerAddress ? " · owner" : ""}
         </div>
       `).join("") || `<div class="cp-wallet-pill empty">No wallets on this profile</div>`;
+
+      // Any wallet listed on the profile can edit it; only the owner — the
+      // wallet that created it — can delete it or approve a new wallet joining.
+      const permissionNote = !mpState.signingAddress
+        ? `<div class="cp-hint" style="margin-top:8px">Connect a wallet that's on this profile to make changes.</div>`
+        : mpState.isOwner
+          ? `<div class="cp-hint" style="margin-top:8px">You're signed in as the profile owner.</div>`
+          : mpState.isMember
+            ? `<div class="cp-hint" style="margin-top:8px">You can edit this profile. Only the owner wallet can delete it.</div>`
+            : `<div class="cp-hint" style="margin-top:8px">The connected wallet isn't on this profile, so it can't make changes.</div>`;
 
       app.innerHTML = `
         <div class="cp-page">
@@ -3792,21 +3833,23 @@
             <div class="cp-label" style="margin-bottom:12px">Wallets on this profile</div>
             <div>${walletList}</div>
             <div class="cp-hint" style="margin-top:8px">
-              Adding or removing wallets isn't wired up in the UI yet — each requires a signature from that specific wallet, which means connecting them one at a time. Reach out to us if you need this soon.
+              Adding a wallet isn't wired up in the UI yet. It needs two signatures — the owner wallet approving the specific address, then the wallet itself proving control — and the wallet kit connects one wallet at a time. Reach out to us if you need this soon.
             </div>
+            ${permissionNote}
           </div>
 
           <div class="cp-status" id="mpStatus"></div>
 
           <div class="cp-actions">
             <button class="btn btn-secondary" onclick="switchPage('portfolio')">Back to Portfolio</button>
-            <button class="btn" id="mpSave" onclick="saveProfileChanges()">Save Changes</button>
+            <button class="btn" id="mpSave" onclick="saveProfileChanges()"${mpState.isMember ? "" : " disabled"}>Save Changes</button>
           </div>
 
           <div class="cp-card" style="border-color:var(--red); margin-top:32px">
             <div class="cp-label" style="color:var(--red); margin-bottom:8px">Danger Zone</div>
             <div style="font-size:13px; color:var(--text-muted); line-height:1.5; margin-bottom:12px">
               Delete this profile permanently. The URL <span style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace">/p/${escapeHtml(mpState.slug)}</span> will 404 and the slug becomes available for anyone to claim.
+              ${mpState.isOwner ? "" : `<br><strong>Only the owner wallet can delete this profile.</strong> Connect ${mpState.ownerAddress ? escapeHtml(mpState.ownerAddress.slice(0, 8)) + "…" + escapeHtml(mpState.ownerAddress.slice(-6)) : "the owner wallet"} to do that.`}
             </div>
             <div class="cp-field">
               <label class="cp-label" for="mpDeleteConfirm">Type <span style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace">${escapeHtml(mpState.slug)}</span> to confirm</label>
@@ -3829,9 +3872,10 @@
           document.querySelectorAll("#mpEmojiPicker .cp-emoji-btn").forEach(b => b.classList.toggle("selected", b === btn));
         });
       });
+      document.getElementById("mpDeleteConfirm").disabled = !mpState.isOwner;
       document.getElementById("mpDeleteConfirm").addEventListener("input", (e) => {
         mpState.deleteConfirmText = e.target.value;
-        document.getElementById("mpDelete").disabled = e.target.value !== mpState.slug;
+        document.getElementById("mpDelete").disabled = !mpState.isOwner || e.target.value !== mpState.slug;
       });
     }
 
@@ -3845,12 +3889,18 @@
     // Ask the wallet to sign a challenge for (action, this profile) and hand
     // the signed pair back. Throws if the user cancels or the wallet returns
     // an unexpected shape.
-    async function requestSignedChallenge(action) {
-      if (!mpState.signingAddress) throw new Error("No wallet available to sign — connect a wallet on the profile");
+    async function requestSignedChallenge(action, target = null) {
+      if (!mpState.signingAddress) throw new Error("Connect a wallet that's on this profile to make changes");
+      if (action === "delete-profile" && !mpState.isOwner) {
+        throw new Error("Only the profile owner can delete it");
+      }
+      if (action === "modify-profile" && !mpState.isMember) {
+        throw new Error("The connected wallet isn't on this profile");
+      }
       const chRes = await fetch(`${API_BASE}/api/v1/auth/challenge`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ address: mpState.signingAddress, action, slug: mpState.slug }),
+        body: JSON.stringify({ address: mpState.signingAddress, action, slug: mpState.slug, target }),
       });
       const ch = await chRes.json();
       if (!chRes.ok) throw new Error(ch.error || "Failed to request challenge");
@@ -4134,15 +4184,15 @@
           <div class="rwa-category">
             <div class="rwa-category-header">
               <div class="rwa-category-name">
-                <a href="${expertUrl}" target="_blank" rel="noopener" style="color:inherit; text-decoration:underline dotted" title="Asset & issuer on stellar.expert">${escapeHtml(t.symbol)}</a>
+                <a href="${escapeHtml(safeUrl(expertUrl))}" target="_blank" rel="noopener" style="color:inherit; text-decoration:underline dotted" title="Asset & issuer on stellar.expert">${escapeHtml(t.symbol)}</a>
               </div>
               <div class="rwa-category-count">spot ${fmtFxRate(t.spotBuyRate)} USD/${escapeHtml(t.symbol)} · quoted ${escapeHtml(fmtAgo(t.quotedAt))}</div>
             </div>
             <div class="rwa-category-desc">
               ${escapeHtml(t.name)} ·
               liquidity: Stellar DEX order books + classic pools ·
-              <a href="${marketUrl}" target="_blank" rel="noopener" style="color:var(--accent, #6366f1)">order book ↗</a> ·
-              <a href="${expertUrl}" target="_blank" rel="noopener" style="color:var(--accent, #6366f1)">issuer ↗</a>
+              <a href="${escapeHtml(safeUrl(marketUrl))}" target="_blank" rel="noopener" style="color:var(--accent, #6366f1)">order book ↗</a> ·
+              <a href="${escapeHtml(safeUrl(expertUrl))}" target="_blank" rel="noopener" style="color:var(--accent, #6366f1)">issuer ↗</a>
             </div>
             <div style="overflow-x:auto">
               <table style="width:100%; border-collapse:collapse; font-size:13px; table-layout:fixed">
@@ -4371,7 +4421,7 @@
         const href = pool.url || p.url || "";
         const rowTag = href ? "a" : "div";
         const rowAttrs = href
-          ? ` href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" title="Open ${escapeHtml(pool.name)} on ${escapeHtml(p.name)}"`
+          ? ` href="${escapeHtml(safeUrl(href))}" target="_blank" rel="noopener noreferrer" title="Open ${escapeHtml(pool.name)} on ${escapeHtml(p.name)}"`
           : "";
         html += `
           <${rowTag} class="defi-pool-row${href ? " defi-pool-link" : ""}"${rowAttrs} data-defi-search="${escapeHtml((pool.name + " " + (pool.assets || []).join(" ")).toLowerCase())}">
@@ -4427,7 +4477,7 @@
               <div class="defi-protocol-tvl">${fmtTvl(p.totalTvlUSD)}<span class="defi-tvl-sub">TVL on Stellar</span></div>
             </div>
             <div class="rwa-category-desc">${escapeHtml(p.blurb || "")}
-              <a class="defi-protocol-link" href="${escapeHtml(p.url || "#")}" target="_blank" rel="noopener">Visit ${escapeHtml(p.name)} →</a>
+              <a class="defi-protocol-link" href="${escapeHtml(safeUrl(p.url) || "#")}" target="_blank" rel="noopener">Visit ${escapeHtml(p.name)} →</a>
             </div>
       `;
       if (p.loading) {
@@ -4574,7 +4624,7 @@
               isSoroban ? "soroban" : "classic",
             ].filter(Boolean).join(" ").toLowerCase();
             html += `
-              <a class="rwa-asset-row" href="${href}" data-rwa-search="${escapeHtml(searchable)}">
+              <a class="rwa-asset-row" href="${escapeHtml(safeUrl(href))}" data-rwa-search="${escapeHtml(searchable)}">
                 <div class="rwa-asset-code"><span class="rwa-asset-code-text">${escapeHtml(a.code)}</span>${kindBadge}</div>
                 <div>
                   <div class="rwa-asset-issuer">${escapeHtml(a.issuerName || "Unknown issuer")}</div>
@@ -4668,7 +4718,7 @@
       }
 
       const sourceLinkHtml = a.statsSourceUrl
-        ? `<a class="rwa-stat-sourcelink" href="${escapeHtml(a.statsSourceUrl)}" target="_blank" rel="noopener" title="${escapeHtml(a.statsSource || 'Source')}">* Reference →</a>`
+        ? `<a class="rwa-stat-sourcelink" href="${escapeHtml(safeUrl(a.statsSourceUrl))}" target="_blank" rel="noopener" title="${escapeHtml(a.statsSource || 'Source')}">* Reference →</a>`
         : "";
       // Timestamp isn't shown INSIDE either yield card — a single shared
       // "as of X · source: Y" line is rendered below the stats grid and
@@ -4693,7 +4743,7 @@
           </div>
           <div class="rwa-detail-issuer">
             ${a.issuerUrl
-              ? `<a href="${escapeHtml(a.issuerUrl)}" target="_blank" rel="noopener" style="color:var(--stellar-blue);text-decoration:none;">${escapeHtml(a.issuerName || "Unknown issuer")} ↗</a>`
+              ? `<a href="${escapeHtml(safeUrl(a.issuerUrl))}" target="_blank" rel="noopener" style="color:var(--stellar-blue);text-decoration:none;">${escapeHtml(a.issuerName || "Unknown issuer")} ↗</a>`
               : escapeHtml(a.issuerName || "Unknown issuer")}
           </div>
       `;
@@ -4737,8 +4787,8 @@
           <div class="rwa-address-row">
             <div class="rwa-address-text" title="${escapeHtml(address)}">${escapeHtml(address)}</div>
             <div class="rwa-address-actions">
-              <button class="rwa-link-btn" onclick="copyToClipboard('${escapeHtml(address)}', this)">Copy</button>
-              ${expertUrl ? `<a class="rwa-link-btn" href="${expertUrl}" target="_blank" rel="noopener">Stellar Expert ↗</a>` : ""}
+              <button class="rwa-link-btn" data-action="copy-address" data-address="${escapeHtml(address)}">Copy</button>
+              ${expertUrl ? `<a class="rwa-link-btn" href="${escapeHtml(safeUrl(expertUrl))}" target="_blank" rel="noopener">Stellar Expert ↗</a>` : ""}
             </div>
           </div>
 
@@ -4751,7 +4801,7 @@
         html += `<div class="rwa-venues">`;
         for (const v of venues) {
           if (!v.url) continue;
-          html += `<a class="rwa-link-btn" href="${escapeHtml(v.url)}" target="_blank" rel="noopener">${escapeHtml(v.name || v.url)} ↗</a>`;
+          html += `<a class="rwa-link-btn" href="${escapeHtml(safeUrl(v.url))}" target="_blank" rel="noopener">${escapeHtml(v.name || v.url)} ↗</a>`;
         }
         html += `</div>`;
       }
@@ -4778,6 +4828,23 @@
         '"': "&quot;",
         "'": "&#39;",
       })[c]);
+    }
+
+    // Only ever emit a URL we know is safe to navigate to. Interpolating an
+    // attacker-influenced value straight into href/src allows `javascript:`,
+    // and escapeHtml does not help: the HTML parser decodes entities before the
+    // URL is parsed. https: and same-origin relative paths only.
+    function safeUrl(u) {
+      if (typeof u !== "string") return "";
+      const trimmed = u.trim();
+      if (trimmed === "" || trimmed === "#") return trimmed;
+      if (/^(\/|#|\?)[^/\\]/.test(trimmed) || /^\/$/.test(trimmed)) return trimmed;
+      try {
+        const parsed = new URL(trimmed, window.location.origin);
+        if (parsed.protocol === "https:") return parsed.href;
+        if (parsed.protocol === "http:" && /^(localhost|127\.0\.0\.1)$/.test(parsed.hostname)) return parsed.href;
+      } catch (e) { /* unparseable */ }
+      return "";
     }
 
     function pageFromHash() {
@@ -5015,7 +5082,7 @@
             ? (w.balance / 1_000_000_000).toLocaleString("en-US", { maximumFractionDigits: 1 }) + "B XLM"
             : (w.balance / 1_000_000).toLocaleString("en-US", { maximumFractionDigits: 0 }) + "M XLM") : "—";
           const assets = w.assetCount != null ? w.assetCount : "—";
-          return `<tr onclick="lookUpWhale('${w.address}')">
+          return `<tr class="whale-row" data-action="look-up-whale" data-address="${escapeHtml(w.address)}">
             <td class="whale-rank">#${i + 1}</td>
             <td class="whale-address"><a href="#" onclick="event.preventDefault()">${shortAddr}</a></td>
             <td class="whale-balance">${balM}</td>
@@ -5046,7 +5113,7 @@
             ? "$" + (w.totalUSD / 1_000_000).toLocaleString("en-US", { maximumFractionDigits: 1 }) + "M"
             : "$" + Math.round(w.totalUSD).toLocaleString("en-US");
           const assets = w.assetCount != null ? w.assetCount : "—";
-          return `<tr onclick="lookUpWhale('${w.address}')">
+          return `<tr class="whale-row" data-action="look-up-whale" data-address="${escapeHtml(w.address)}">
             <td class="whale-rank">#${i + 1}</td>
             <td class="whale-address"><a href="#" onclick="event.preventDefault()">${shortAddr}</a></td>
             <td class="whale-balance">${usdVal}</td>
@@ -5128,12 +5195,6 @@
       }
     }
 
-    function escapeShareHtml(s) {
-      return String(s ?? "").replace(/[&<>"']/g, (c) => ({
-        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-      })[c]);
-    }
-
     function buildShareUrl() {
       if (!walletList || walletList.length === 0) return null;
       // Encode the current view (which wallet) and tab so the recipient
@@ -5165,7 +5226,7 @@
         <div class="share-modal" onclick="event.stopPropagation()">
           <div class="share-modal-title">Share this portfolio</div>
           <div class="share-modal-sub">Anyone with this link can see the same wallets, positions, and balances. Read-only — they can choose to save into their own portfolio.</div>
-          <div class="share-modal-url" id="shareModalUrl">${escapeShareHtml(url)}</div>
+          <div class="share-modal-url" id="shareModalUrl">${escapeHtml(url)}</div>
           <div class="share-modal-actions">
             <button class="share-btn" id="shareCopyBtn">Copy link</button>
             <button class="share-btn" id="shareCloseBtn">Close</button>
@@ -5198,9 +5259,15 @@
       try {
         const payload = JSON.parse(json);
         if (!Array.isArray(payload.wallets) || payload.wallets.length === 0) return null;
+        // Addresses were already validated here; labels were not. `w.l` was
+        // taken completely raw — no type check, no length cap, no filtering —
+        // straight into walletList, which six renderers wrote into innerHTML.
+        // A crafted share link was therefore a one-click XSS that never touched
+        // the server. Cap the list too, to match the server's limit.
         const wallets = payload.wallets
-          .map((w) => ({ address: w.a || w.address, label: w.l || w.label || null }))
-          .filter((w) => w.address && /^G[A-Z2-7]{55}$/.test(w.address));
+          .map((w) => ({ address: w.a || w.address, label: cleanLabel(w.l ?? w.label) }))
+          .filter((w) => w.address && /^G[A-Z2-7]{55}$/.test(w.address))
+          .slice(0, 25);
         if (wallets.length === 0) return null;
 
         // v2: optional view + tab. Validate against the imported wallet
@@ -5267,7 +5334,7 @@
           avatar: data.profile.avatarEmoji,
           bio: data.profile.bio,
           profileSlug: data.profile.slug,
-          wallets: data.wallets.map((w) => ({ address: w.address, label: w.label })),
+          wallets: data.wallets.map((w) => ({ address: w.address, label: cleanLabel(w.label) })),
         };
         walletList = sharedView.wallets.map((w) => ({ address: w.address, label: w.label }));
         activeView = "all";
@@ -5403,6 +5470,94 @@
       }
     }
 
+    // ── Delegated event handling ───────────────────────────────────────
+    //
+    // These handlers used to be inline `onclick="fn('${w.address}')"`
+    // attributes, i.e. JavaScript source built by string interpolation. escapeHtml
+    // is the WRONG escaper for that context: it turns ' into &#39;, which the
+    // HTML parser converts back to ' before the JS parser ever sees it — so
+    // escaping the value there provides no protection at all. The value now
+    // travels as a data-* attribute (a plain string, never parsed as code) and
+    // the behaviour lives here.
+    //
+    // Installed once at document level, so it keeps working for content that is
+    // re-rendered into innerHTML. `closest` picks the innermost element with a
+    // data-action, which is what makes the wallet-remove button inside a
+    // clickable wallet row resolve to "remove" rather than "switch view".
+    document.addEventListener("click", (event) => {
+      const el = event.target.closest("[data-action]");
+      if (!el) return;
+      const address = el.getAttribute("data-address");
+      switch (el.getAttribute("data-action")) {
+        case "look-up-whale":
+          if (address) lookUpWhale(address);
+          break;
+        case "switch-wallet-view":
+          if (address) switchWalletView(address);
+          break;
+        case "remove-wallet":
+          if (address) removeWalletFromPortfolio(address, event);
+          break;
+        case "copy-address":
+          if (address) copyToClipboard(address, el);
+          break;
+        case "chart-range": {
+          const range = el.getAttribute("data-range");
+          if (range) changeChartRange(range);
+          break;
+        }
+      }
+    });
+
+    // NFT images point at arbitrary on-chain token_uri hosts, so a broken image
+    // is routine. The fallback used to be an inline onerror that assembled
+    // markup from this.alt; it builds a text node here instead.
+    document.addEventListener("error", (event) => {
+      const img = event.target;
+      if (!(img instanceof HTMLImageElement)) return;
+      const mode = img.getAttribute("data-nft-fallback");
+      if (!mode) return;
+      const fallback = document.createElement("div");
+      fallback.className = "nft-card-image-fallback";
+      fallback.textContent = mode === "initials"
+        ? (img.alt || "").slice(0, 2).toUpperCase() || "NFT"
+        : "NFT";
+      img.replaceWith(fallback);
+    }, true); // capture: error events on <img> do not bubble
+
+    // Client-side twin of lib/sanitize.js's cleanLabel.
+    //
+    // Duplicated deliberately, and it has to be: a label can reach innerHTML
+    // without the server ever seeing it, via a ?import= share link. Filtering
+    // only on the server would leave that path wide open, and escaping only at
+    // render time would leave payloads already sitting in the database.
+    //
+    // Keep in sync with lib/sanitize.js. (It stays duplicated until index.html
+    // is split into modules that can share code.)
+    const UNSAFE_LABEL_CHARS =
+      /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u2028\u2029\u200E\u200F\u202A-\u202E\u2066-\u2069<>`]/g;
+    const LABEL_MAX = 40;
+    function cleanLabel(value) {
+      if (typeof value !== "string") return null;
+      const stripped = value.replace(UNSAFE_LABEL_CHARS, "").replace(/\s+/g, " ").trim();
+      const points = Array.from(stripped);
+      const capped = points.length <= LABEL_MAX ? stripped : points.slice(0, LABEL_MAX).join("");
+      return capped.length > 0 ? capped : null;
+    }
+
+    // Overlay this browser's own labels onto a portfolio response by address.
+    function applyLocalWalletLabels(data) {
+      if (!data || !Array.isArray(data.wallets)) return data;
+      const byAddress = new Map(
+        (sharedView.active ? (sharedView.wallets || []) : (walletList || []))
+          .map((w) => [w.address, cleanLabel(w.label)])
+      );
+      for (const wallet of data.wallets) {
+        wallet.label = byAddress.get(wallet.address) ?? null;
+      }
+      return data;
+    }
+
     async function loadMultiWalletPortfolio() {
       const render = claimRender();
       multiWalletMode = true;
@@ -5426,6 +5581,11 @@
         });
         if (!res.ok) throw new Error("Failed to load portfolio");
         portfolioData = await res.json();
+        // The server no longer returns wallet labels: tracked_wallets is global
+        // and was writable by anyone for any address, so its labels leaked
+        // between visitors and were rendered raw. Our labels are browser-local,
+        // so merge them in here — one place, so every renderer gets them.
+        applyLocalWalletLabels(portfolioData);
         // The user may have navigated to another page while the portfolio
         // fetch was in flight — this was THE bug where the RWA detail view
         // suddenly turned into the portfolio view.
@@ -5434,7 +5594,7 @@
       } catch (e) {
         if (renderSuperseded(render)) return;
         app.innerHTML = `
-          <div class="error-banner">${e.message}</div>
+          <div class="error-banner">${escapeHtml(e.message)}</div>
           <div style="text-align:center; padding: 40px;">
             <button class="btn" onclick="enterPortfolioMode()">Try again</button>
           </div>
@@ -5453,8 +5613,8 @@
         <div class="share-banner">
           <div class="share-banner-text">
             ${sharedView.profileSlug
-              ? `<span style="font-size:20px;margin-right:6px">${escapeShareHtml(sharedView.avatar || "🚀")}</span>Viewing <strong>${escapeShareHtml(sharedView.name || "Profile")}</strong>${sharedView.bio ? ` &middot; <span style="color:var(--text-muted)">${escapeShareHtml(sharedView.bio)}</span>` : ""} &middot; ${d.walletCount} wallet${d.walletCount !== 1 ? "s" : ""} &middot; read-only`
-              : `Viewing <strong>${escapeShareHtml(sharedView.name || "Shared portfolio")}</strong> &middot; ${d.walletCount} wallet${d.walletCount !== 1 ? "s" : ""} &middot; read-only`}
+              ? `<span style="font-size:20px;margin-right:6px">${escapeHtml(sharedView.avatar || "🚀")}</span>Viewing <strong>${escapeHtml(sharedView.name || "Profile")}</strong>${sharedView.bio ? ` &middot; <span style="color:var(--text-muted)">${escapeHtml(sharedView.bio)}</span>` : ""} &middot; ${d.walletCount} wallet${d.walletCount !== 1 ? "s" : ""} &middot; read-only`
+              : `Viewing <strong>${escapeHtml(sharedView.name || "Shared portfolio")}</strong> &middot; ${d.walletCount} wallet${d.walletCount !== 1 ? "s" : ""} &middot; read-only`}
           </div>
           <div class="share-banner-actions">
             <button class="share-btn" onclick="saveSharedWallets()">Save to my portfolio</button>
@@ -5493,13 +5653,17 @@
 
       // Individual wallets
       (d.wallets || []).forEach((w, i) => {
-        const label = w.label || shortenAddr(w.address);
+        // Labels are user-supplied. They are filtered at write time and on
+        // the way in from a ?import= link, but this is the render boundary and
+        // must escape regardless — two independent defences, neither relying on
+        // the other.
+        const label = escapeHtml(w.label || shortenAddr(w.address));
         const color = getWalletColor(i);
-        const initials = (w.label || w.address.slice(0, 2)).slice(0, 2).toUpperCase();
+        const initials = escapeHtml((w.label || w.address.slice(0, 2)).slice(0, 2).toUpperCase());
         const pct = d.totalValueUSD > 0 ? ((w.totalValueUSD / d.totalValueUSD) * 100).toFixed(1) : "0";
 
         walletPanelHTML += `
-          <div class="wallet-item ${activeView === w.address ? "active" : ""}" onclick="switchWalletView('${w.address}')">
+          <div class="wallet-item ${activeView === w.address ? "active" : ""}" data-action="switch-wallet-view" data-address="${escapeHtml(w.address)}">
             <div class="wallet-item-left">
               <div class="wallet-item-avatar" style="background: ${color};">${initials}</div>
               <div class="wallet-item-info">
@@ -5511,7 +5675,7 @@
               <div class="wallet-item-value">${fmtBigUSD(w.totalValueUSD)}</div>
               <div class="wallet-item-assets">${pct}% · ${w.balanceCount} assets</div>
             </div>
-            ${sharedView.active ? "" : `<button class="wallet-item-remove" onclick="removeWalletFromPortfolio('${w.address}', event)" title="Remove wallet">&times;</button>`}
+            ${sharedView.active ? "" : `<button class="wallet-item-remove" data-action="remove-wallet" data-address="${escapeHtml(w.address)}" title="Remove wallet">&times;</button>`}
           </div>
         `;
       });
@@ -5586,7 +5750,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
       container.innerHTML = `
         <div class="portfolio-header">
           <div>
-            <div class="portfolio-address">${d.label ? d.label + " — " : ""}${d.address}</div>
+            <div class="portfolio-address">${d.label ? escapeHtml(d.label) + " — " : ""}${escapeHtml(d.address)}</div>
             <div class="portfolio-value">${fmtBigUSD(d.totalValueUSD)}</div>
             <div class="portfolio-meta">
               <div class="meta-item">Assets: <span>${d.balanceCount}</span></div>
@@ -5647,10 +5811,10 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
       // Wallet chips
       let chipsHTML = '<div class="agg-wallet-chips">';
       (d.wallets || []).forEach((w, i) => {
-        const label = w.label || shortenAddr(w.address);
+        const label = escapeHtml(w.label || shortenAddr(w.address));
         const color = getWalletColor(i);
         chipsHTML += `
-          <div class="agg-chip" onclick="switchWalletView('${w.address}')">
+          <div class="agg-chip" data-action="switch-wallet-view" data-address="${escapeHtml(w.address)}">
             <div class="agg-chip-dot" style="background: ${color.replace("linear-gradient(135deg, ", "").split(",")[0]};"></div>
             ${label}: ${fmtUSD(w.totalValueUSD)}
           </div>
@@ -5763,7 +5927,9 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         `;
         balances.forEach((b) => {
           const iconClass = b.code === "XLM" ? "xlm" : (b.code === "USDC" || b.code === "yUSDC") ? "usdc" : "default";
-          const initials = b.code.slice(0, 2);
+          // Classic asset codes are alphanumeric, but Soroban-derived symbols
+          // reach the same renderers, so escape rather than reason about origin.
+          const initials = escapeHtml(String(b.code).slice(0, 2));
           const issuerShort = b.issuer ? shortenAddr(b.issuer) : "Native";
           const priceStr = b.price ? "$" + fmt(b.price.usd, b.price.usd < 0.01 ? 6 : 4) : "";
           const valueStr = b.totalValueUSD > 0 ? fmtUSD(b.totalValueUSD) : '<span class="unpriced">No price</span>';
@@ -5773,8 +5939,8 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
               <div class="token-info">
                 <div class="token-icon ${iconClass}">${initials}</div>
                 <div>
-                  <div class="token-name">${b.code}</div>
-                  <div class="token-issuer">${issuerShort} · ${walletCountStr}</div>
+                  <div class="token-name">${escapeHtml(b.code)}</div>
+                  <div class="token-issuer">${escapeHtml(issuerShort)} · ${walletCountStr}</div>
                 </div>
               </div>
               <div class="token-balance">${fmt(b.totalBalance, b.totalBalance < 1 ? 7 : 2)}</div>
@@ -5922,9 +6088,9 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         legendEl.innerHTML = wallets.map((w, i) => {
           const pct = ((w.totalValueUSD / total) * 100).toFixed(1);
           const label = w.label || shortenAddr(w.address);
-          return `<div class="pie-legend-item" data-idx="${i}" onclick="switchWalletView('${w.address}')">
+          return `<div class="pie-legend-item" data-idx="${i}" data-action="switch-wallet-view" data-address="${escapeHtml(w.address)}">
             <div class="pie-legend-dot" style="background:${colors[i]};"></div>
-            <span class="pie-legend-label" title="${w.label || w.address}">${label}</span>
+            <span class="pie-legend-label" title="${escapeHtml(w.label || w.address)}">${label}</span>
             <span class="pie-legend-value">${fmtUSD(w.totalValueUSD)}</span>
             <span class="pie-legend-pct">${pct}%</span>
           </div>`;
@@ -6165,9 +6331,9 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         ? snap.tokens.map(t => `
           <div class="token-row">
             <div class="token-info">
-              <div class="token-icon">${(t.asset || "?")[0]}</div>
+              <div class="token-icon">${escapeHtml((t.asset || "?")[0])}</div>
               <div>
-                <div class="token-name">${t.asset}</div>
+                <div class="token-name">${escapeHtml(t.asset)}</div>
                 <div class="token-balance">${fmt(t.balance, 4)}</div>
               </div>
             </div>
@@ -6245,7 +6411,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
       } catch (e) {
         if (renderSuperseded(render)) return;
         app.innerHTML = `
-          <div class="error-banner">${e.message}</div>
+          <div class="error-banner">${escapeHtml(e.message)}</div>
           <div class="welcome" style="padding-top: 40px;">
             <p>Check the address and try again.</p>
           </div>
@@ -6427,7 +6593,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         const code = t.asset.code;
         const isSoroban = t.type === "soroban_token";
         const iconClass = isSoroban ? (code.includes("BTC") ? "default" : "default") : getIconClass(code, t.type);
-        const initials = code.slice(0, 2);
+        const initials = escapeHtml(String(code).slice(0, 2));
         const issuerShort = isSoroban
           ? (t.asset.contractId ? shortenAddr(t.asset.contractId) : "Soroban")
           : (t.asset.issuer ? shortenAddr(t.asset.issuer) : "Native");
@@ -6444,8 +6610,8 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
             <div class="token-info">
               <div class="token-icon ${iconClass}" ${isSoroban && code.includes("BTC") ? 'style="background: linear-gradient(135deg, #f59e0b, #ef4444);"' : ""}>${initials}</div>
               <div>
-                <div class="token-name">${code}${sorobanBadge}</div>
-                <div class="token-issuer">${issuerShort}</div>
+                <div class="token-name">${escapeHtml(code)}${sorobanBadge}</div>
+                <div class="token-issuer">${escapeHtml(issuerShort)}</div>
               </div>
             </div>
             <div class="token-balance">
@@ -6523,10 +6689,13 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         html += `<div class="defi-card">`;
         html += `<div class="defi-card-header">`;
         html += `<div class="defi-protocol">`;
-        html += `<div class="defi-protocol-icon ${protocolIcon}">${protocolLabel.slice(0, 2)}</div>`;
+        // protocolLabel, poolName and row.asset below come from Soroban
+        // contract state — symbol()/name() on a contract anyone can deploy — so
+        // they are attacker-controlled strings, not fixed protocol names.
+        html += `<div class="defi-protocol-icon ${protocolIcon}">${escapeHtml(String(protocolLabel).slice(0, 2))}</div>`;
         html += `<div>`;
-        html += `<div style="font-weight:600">${protocolLabel}</div>`;
-        html += `<div style="font-size:12px; color:var(--text-muted)">${group.poolName}</div>`;
+        html += `<div style="font-weight:600">${escapeHtml(protocolLabel)}</div>`;
+        html += `<div style="font-size:12px; color:var(--text-muted)">${escapeHtml(group.poolName)}</div>`;
         html += `</div>`;
         html += `</div>`;
         html += `<div style="text-align:right">`;
@@ -6548,11 +6717,11 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
 
         for (const row of group.rows) {
           html += `<tr>`;
-          html += `<td><strong>${row.asset}</strong></td>`;
+          html += `<td><strong>${escapeHtml(row.asset)}</strong></td>`;
 
           html += `<td class="right">`;
           if (row.supplied > 0) {
-            html += `${fmt(row.supplied, 2)} ${row.asset}<br><span class="muted">${fmtUSD(row.suppliedUSD)}</span>`;
+            html += `${fmt(row.supplied, 2)} ${escapeHtml(row.asset)}<br><span class="muted">${fmtUSD(row.suppliedUSD)}</span>`;
           } else {
             html += `<span class="muted">—</span>`;
           }
@@ -6560,7 +6729,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
 
           html += `<td class="right">`;
           if (row.borrowed > 0) {
-            html += `<span class="negative">${fmt(row.borrowed, 2)} ${row.asset}</span><br><span class="muted">${fmtUSD(row.borrowedUSD)}</span>`;
+            html += `<span class="negative">${fmt(row.borrowed, 2)} ${escapeHtml(row.asset)}</span><br><span class="muted">${fmtUSD(row.borrowedUSD)}</span>`;
           } else {
             html += `<span class="muted">—</span>`;
           }
@@ -6627,8 +6796,8 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
         html += `<div class="defi-card">`;
         html += `<div class="defi-card-header">`;
         html += `<div class="defi-protocol">`;
-        html += `<div class="defi-protocol-icon ${protocolIcon}">${protocolLabel.slice(0, 2)}</div>`;
-        html += `<div><div style="font-weight:600">${protocolLabel}</div>`;
+        html += `<div class="defi-protocol-icon ${protocolIcon}">${escapeHtml(String(protocolLabel).slice(0, 2))}</div>`;
+        html += `<div><div style="font-weight:600">${escapeHtml(protocolLabel)}</div>`;
 
         if (pos.token0 && pos.token1) {
           html += `<div style="font-size:12px; color:var(--text-muted)">${pos.token0.symbol} / ${pos.token1.symbol}`;
@@ -6667,7 +6836,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
           const borrowRow = pos.borrow
             ? `<div class="defi-detail-item">
                  <div class="defi-detail-label">Borrowed</div>
-                 <div class="defi-detail-value" style="color:var(--red)">${pos.borrow.amount} ${pos.borrow.asset}</div>
+                 <div class="defi-detail-value" style="color:var(--red)">${escapeHtml(String(pos.borrow.amount))} ${escapeHtml(pos.borrow.asset)}</div>
                </div>`
             : "";
           html += `
@@ -6757,7 +6926,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
       // Range selector buttons
       const ranges = ["24h", "7d", "30d", "90d", "1y", "all"];
       const rangeBtns = ranges.map(r =>
-        `<button class="range-btn ${r === portfolioHistoryRange ? 'active' : ''}" onclick="changeChartRange('${r}')">${r}</button>`
+        `<button class="range-btn ${r === portfolioHistoryRange ? 'active' : ''}" data-action="chart-range" data-range="${escapeHtml(r)}">${escapeHtml(r)}</button>`
       ).join("");
 
       if (!data.snapshots || data.snapshots.length === 0) {
@@ -7242,7 +7411,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
                 const desc = (item.metadata && item.metadata.description) || "";
 
                 const imageHtml = image
-                  ? `<img class="nft-card-image" src="${escapeHtml(image)}" alt="${escapeHtml(name)}" loading="lazy" onerror="this.outerHTML='<div class=&quot;nft-card-image-fallback&quot;>NFT</div>'">`
+                  ? `<img class="nft-card-image" src="${escapeHtml(safeUrl(image))}" alt="${escapeHtml(name)}" loading="lazy" data-nft-fallback="NFT">`
                   : `<div class="nft-card-image-fallback">#${escapeHtml(item.tokenId)}</div>`;
 
                 return `
@@ -7275,7 +7444,7 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
               const confidenceLabel = n.confidence >= 0.7 ? "Likely" : n.confidence >= 0.5 ? "Probable" : "Maybe";
 
               const imageHtml = image
-                ? `<img class="nft-card-image" src="${escapeHtml(image)}" alt="${escapeHtml(name)}" loading="lazy" onerror="this.outerHTML='<div class=&quot;nft-card-image-fallback&quot;>'+this.alt.slice(0,2).toUpperCase()+'</div>'">`
+                ? `<img class="nft-card-image" src="${escapeHtml(safeUrl(image))}" alt="${escapeHtml(name)}" loading="lazy" data-nft-fallback="initials">`
                 : `<div class="nft-card-image-fallback">${escapeHtml(code.slice(0, 2).toUpperCase())}</div>`;
 
               return `
@@ -7299,15 +7468,10 @@ app.innerHTML = walletPanelHTML + buildTimeTravelBar() + renderAggregatedContent
 
     // Minimal HTML escaper for untrusted metadata fields (stellar.toml content
     // is controlled by issuers and can contain anything).
-    function escapeHtml(s) {
-      if (s === null || s === undefined) return "";
-      return String(s)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
-    }
+    // NOTE: escapeHtml and safeUrl are defined once, near the top of this
+    // script. There used to be a second, identical `function escapeHtml`
+    // declaration here — two declarations of the same name in one scope, where
+    // the later silently wins — plus a third copy named escapeShareHtml.
 
     // ── Easter egg: Cramer soundboard (Konami code) ──────────────────
     // Listens for ↑↑↓↓←→←→BA at the document level. Doesn't fire if the

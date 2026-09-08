@@ -1,19 +1,26 @@
 {
   "name": "prototype",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Stellar Scope — Stellar portfolio tracker API + SPA",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.js",
+    "test": "node --test test/*.test.js",
+    "build:vendor": "node_modules/.bin/esbuild vendor-src/stellar-wallets-kit.entry.js --bundle --format=esm --platform=browser --target=es2020 --minify --outfile=public/vendor/stellar-wallets-kit-2.3.0.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@stellar/stellar-sdk": "^15.0.1",
+    "@stellar/stellar-sdk": "^17.0.1",
     "better-sqlite3": "^12.9.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "helmet": "^8.3.0"
+  },
+  "devDependencies": {
+    "@creit.tech/stellar-wallets-kit": "^2.3.0",
+    "esbuild": "^0.28.2"
   }
 }

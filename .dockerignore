@@ -2,5 +2,10 @@ node_modules
 .git
 .DS_Store
 **/.DS_Store
-prototype/CUsersKLINTK*
+# See .gitignore: the committed directory name contains private-use Unicode
+# look-alikes for ':' and '\', so this pattern never matched what it was
+# written for. The directory is gone from the repo now; both patterns stay as
+# a guard against a Windows checkout re-creating it.
+**/node-compile-cache/
+prototype/C*Users*KLINTK*
 *.log

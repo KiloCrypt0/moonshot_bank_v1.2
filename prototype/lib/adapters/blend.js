@@ -584,6 +584,9 @@ async function getPoolsOverview() {
 const BlendAdapter = {
   name: "Blend Protocol",
   protocol: "blend",
+  // Every other adapter exposes `protocolId`; Blend only had `protocol`, so
+  // /api/health's configuredProtocols listed it as `null` in production.
+  protocolId: "blend",
   isConfigured,
   getPositions,
   getPoolsOverview,

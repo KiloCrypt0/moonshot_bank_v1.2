@@ -51,7 +51,7 @@ setInterval(() => {
       requestWindows.delete(ip);
     }
   }
-}, 300_000);
+}, 300_000).unref?.();
 
 /**
  * Express middleware — rate limits by IP, no auth needed.

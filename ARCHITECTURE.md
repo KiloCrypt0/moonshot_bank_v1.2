@@ -1,229 +1,128 @@
-# Stellar Moonshot Bank — Technical Architecture Spec
+# Stellar Scope — Architecture
 
-## Overview
+What this repo actually contains, as of September 2026.
 
-Stellar Moonshot Bank is a standalone portfolio tracking protocol for the Stellar network, providing comprehensive visibility into wallet holdings across all asset types: native XLM, trustline tokens, SDEX positions, liquidity pool shares, Soroban DeFi positions, claimable balances, and NFTs.
+> The previous version of this file described a React Native front end, a
+> PostgreSQL database, Redis and BullMQ. None of those exist, and never did.
+> Anyone joining the project was being pointed at a system that wasn't there,
+> so it has been replaced with a description of the real one.
 
-## System Architecture
+## Shape
 
-### High-Level Data Flow
-
-```
-┌─────────────┐     ┌──────────────────┐     ┌─────────────┐
-│   Frontend   │────▶│   API Gateway    │────▶│  Horizon API │
-│  (React/RN)  │◀────│  (Node.js/Express)│◀────│  (Stellar)   │
-└─────────────┘     └──────────────────┘     └─────────────┘
-                           │    ▲                    
-                           ▼    │                    
-                    ┌──────────────────┐     ┌─────────────┐
-                    │   Price Engine   │────▶│ Soroban RPC  │
-                    │  (Aggregator)    │     └─────────────┘
-                    └──────────────────┘              
-                           │    ▲                    
-                           ▼    │                    
-                    ┌──────────────────┐              
-                    │    Database      │              
-                    │  (PostgreSQL)    │              
-                    └──────────────────┘              
-```
-
-### Core Components
-
-#### 1. Account Resolver
-Fetches full account state from Horizon's `/accounts/{id}` endpoint. Returns:
-- Native XLM balance (including reserved/available split)
-- All trustlines with balances and limits
-- Liquidity pool shares
-- Sponsorship info (who's paying reserves)
-
-#### 2. Asset Registry
-Maintains a catalog of known Stellar assets with metadata:
-- Asset code, issuer, domain (from stellar.toml)
-- Logo URLs, descriptions
-- Market cap, 24h volume
-- Classification (stablecoin, bridge asset, LP token, Soroban token, NFT)
-
-#### 3. Price Engine
-Aggregates pricing from multiple sources:
-- **SDEX orderbook**: Mid-price from Horizon `/order_book` endpoint
-- **Soroban AMMs**: Query pool contracts for reserve ratios
-- **External feeds**: CoinGecko/CoinMarketCap for XLM and major assets
-- **Fallback logic**: If SDEX liquidity < threshold, use external price; smooth prices with TWAP
-
-#### 4. Soroban Position Tracker
-Per-protocol adapters for Soroban DeFi:
-- **AMM positions**: Query LP contract for user's share of reserves
-- **Lending positions**: Query lending protocol for deposits/borrows
-- **Vaults/strategies**: Query vault contracts for underlying value
-- Each adapter implements a standard `PositionAdapter` interface
-
-#### 5. Transaction History Engine
-Processes operations and effects from Horizon:
-- `/accounts/{id}/operations` with cursor-based pagination
-- Decodes operation types (payments, path payments, manage offers, LP deposits/withdrawals)
-- Groups related operations into logical "transactions"
-- Soroban contract invocations decoded via XDR
-
-#### 6. Claimable Balance Tracker
-Monitors `/claimable_balances` for the user's account:
-- Pending airdrops and rewards
-- Time-locked balances with unlock schedules
-- Displays claimable vs. not-yet-claimable status
-
-## Tech Stack
-
-### Backend
-- **Runtime**: Node.js 20+ with TypeScript
-- **Framework**: Express.js or Fastify
-- **Stellar SDK**: `@stellar/stellar-sdk` (Horizon + Soroban RPC)
-- **Database**: PostgreSQL (asset registry, price history, cached positions)
-- **Cache**: Redis (hot account data, rate limit management)
-- **Job Queue**: Bull/BullMQ (background price updates, position sync)
-
-### Frontend
-- **Web**: React 18+ with TypeScript, Vite
-- **Mobile**: React Native (shared component library)
-- **State**: Zustand or TanStack Query
-- **Charts**: Recharts or D3
-- **Wallet Connect**: Freighter SDK, WalletConnect
-
-### Infrastructure
-- **Hosting**: Vercel (web) + Railway/Fly.io (API)
-- **Monitoring**: Sentry, Prometheus + Grafana
-- **CI/CD**: GitHub Actions
-
-## API Design
-
-### REST Endpoints
+A single Node process serves both the API and the front end. There is no build
+step for application code, no framework, and no separate worker.
 
 ```
-GET  /api/v1/account/:address          → Full portfolio summary
-GET  /api/v1/account/:address/balances → Token balances with prices
-GET  /api/v1/account/:address/defi     → Soroban DeFi positions
-GET  /api/v1/account/:address/lp       → Liquidity pool positions
-GET  /api/v1/account/:address/history  → Transaction history
-GET  /api/v1/account/:address/claimable → Claimable balances
-GET  /api/v1/account/:address/nfts     → NFT holdings
-GET  /api/v1/prices/:asset_code/:issuer → Current + historical price
-GET  /api/v1/assets/search?q=          → Asset search/discovery
+                        ┌──────────────────────────────┐
+  Browser               │  Express 5 (prototype/       │       Upstreams
+  ┌───────────────┐     │            server.js)        │     ┌────────────────┐
+  │ public/       │◀───▶│                              │────▶│ Horizon        │
+  │  index.html   │     │  routes  ·  9 DeFi adapters  │────▶│ Soroban RPC    │
+  │  (one file)   │     │  pricing ·  snapshot sched.  │────▶│ CoinGecko      │
+  └───────────────┘     │                              │────▶│ stellar.expert │
+                        └──────────────┬───────────────┘     └────────────────┘
+                                       │
+                              ┌────────▼─────────┐
+                              │ SQLite (WAL)     │
+                              │ better-sqlite3   │
+                              └──────────────────┘
 ```
 
-### WebSocket
-```
-ws://api/v1/stream/:address → Real-time balance updates via Horizon SSE
-```
+Every upstream call is made **server-side**. The browser only ever talks to this
+origin (`API_BASE = window.location.origin`) plus a handful of image hosts.
 
-## Data Models
+## Backend — `prototype/`
 
-### Portfolio Summary
-```typescript
-interface PortfolioSummary {
-  address: string;
-  totalValueUSD: number;
-  change24h: { amount: number; percent: number };
-  breakdown: {
-    native: { xlm: number; usd: number };
-    tokens: TokenBalance[];
-    lpPositions: LPPosition[];
-    defiPositions: DefiPosition[];
-    claimableBalances: ClaimableBalance[];
-    nfts: NFTHolding[];
-  };
-  lastUpdated: string;
-}
+- **`server.js`** (~1,900 lines) — Express app, all HTTP routes, the protocol
+  adapter fan-out, and the process lifecycle. Exports `{ app, __setTestDeps }`;
+  `app.listen` and all background work are behind `require.main === module`, so
+  requiring it from a test is side-effect free.
+- **`lib/`** — 30 modules. The ones worth knowing:
+  - `history-db.js` — SQLite schema, prepared statements, snapshot read/write,
+    retention. Owns `runMigrations()` and `runBackfills()`; the latter are plain
+    exported functions so tests can run them against a scratch database.
+  - `public-profiles.js` — the `public_profiles` / `profile_wallets` tables.
+    Every profile has an `owner_address`.
+  - `profile-auth.js` — the signature-challenge flow (below).
+  - `public-api-routes.js` — the open `/api/v1/public/*` API, the profile
+    routes, `/p/:slug`, and `/api/docs`.
+  - `sanitize.js` — write-time filtering for all user-supplied text.
+  - `security-headers.js` — helmet plus a hand-written CSP.
+  - `pricing-engine.js`, `token-price-map.js`, `token-universe.js`,
+    `soroban-rpc.js` — asset resolution and pricing.
+  - `snapshot-scheduler.js` — hourly-to-5-minute portfolio snapshots by tier.
+  - `defi-explorer.js`, `rwa-yield-fetcher.js`, `fx-efficiency.js` — background
+    refreshers behind in-memory caches.
+- **`lib/adapters/`** — nine DeFi adapters (Blend, K2, Aquarius, Templar,
+  Upshift, Sentora, Solv, plus two LP discoverers). They run in parallel under
+  `Promise.allSettled` with a per-adapter timeout and a last-known-good cache,
+  so one broken protocol degrades a single card instead of the whole portfolio.
+  Every adapter exposes `{ name, protocolId, isConfigured, getPositions }`; a
+  boot assertion fails the process if `protocolId` is missing.
 
-interface TokenBalance {
-  asset: { code: string; issuer: string; domain?: string; logo?: string };
-  balance: string;
-  valueUSD: number;
-  price: { usd: number; change24h: number };
-  trustline: { limit: string; authorized: boolean };
-}
+## Frontend — `prototype/public/index.html`
 
-interface LPPosition {
-  poolId: string;
-  assets: [AssetInfo, AssetInfo];
-  shares: string;
-  reserves: [string, string];
-  valueUSD: number;
-  feesEarned24h: number;
-}
+One 7,400-line file: vanilla JS, no framework, no bundler. Four inline
+`<script>` blocks — three small ones plus the ~4,200-line application. Wallet
+connection is a `<script type="module">` importing the **self-hosted** Stellar
+Wallets Kit from `/vendor/`, built by `npm run build:vendor` from the version
+pinned in `package.json`.
 
-interface DefiPosition {
-  protocol: string;
-  type: 'lending' | 'borrowing' | 'staking' | 'vault';
-  contractId: string;
-  assets: AssetInfo[];
-  deposited: string;
-  valueUSD: number;
-  apy?: number;
-}
-```
+Splitting this file is the obvious next refactor; the shared pieces (router,
+state, `api()`, the escaper) are the ones to extract first.
 
-## Pricing Strategy
+## Storage
 
-### Price Resolution Order
-1. Check Redis cache (TTL: 30s for major assets, 60s for others)
-2. Query SDEX orderbook — use mid-price if spread < 5% and depth > $1000
-3. Query Soroban AMM pools for Soroban-native tokens
-4. Fall back to external API (CoinGecko) for XLM and bridged assets
-5. For exotic assets with no liquidity: mark as "unpriced" in UI
+SQLite via `better-sqlite3` in WAL mode. `foreign_keys` is on (better-sqlite3
+enables it by default), which matters: `token_snapshots` references
+`portfolio_snapshots` with no `ON DELETE CASCADE`, so anything deleting
+snapshots must delete child rows first.
 
-### Anti-Manipulation
-- Reject prices where SDEX spread > 10%
-- Use 5-minute TWAP for portfolio valuation (not spot)
-- Flag assets with < $100 in orderbook depth
+Tables: `tracked_wallets`, `portfolio_snapshots`, `token_snapshots`,
+`discovered_balances`, `public_profiles`, `profile_wallets`, `schema_meta`.
 
-## Soroban Integration
+**`HISTORY_DB_PATH` must point at a mounted volume in production.** On the
+container filesystem the database — and therefore every user-created profile —
+is discarded on each deploy. The resolved path is logged at boot.
 
-### Adapter Interface
-```typescript
-interface ProtocolAdapter {
-  protocolId: string;
-  name: string;
-  contractIds: string[];
-  
-  getPositions(address: string): Promise<DefiPosition[]>;
-  getHistoricalValue(address: string, from: Date, to: Date): Promise<ValuePoint[]>;
-  getTVL(): Promise<number>;
-}
-```
+Wallet **lists** are not server state. They live in each browser's
+`localStorage` (`stellarscope.walletList`). The server keeps `tracked_wallets`
+only so the scheduler can keep accumulating history, and it does not return
+wallet labels to callers.
 
-### Known Protocols to Support (initial)
-- Blend (lending/borrowing)
-- Soroswap (AMM)
-- Phoenix (DEX aggregator)
-- Aquarius (liquidity rewards)
-- Custom LP contracts
+## Profile ownership auth
 
-## Security Considerations
+The only place the app accepts a mutation tied to an identity.
 
-- **Read-only by design**: Never request secret keys; only public addresses
-- **Rate limiting**: Per-IP and per-address limits on API
-- **Input validation**: Stellar address format validation (G... or M... for muxed)
-- **CORS**: Restrict to known frontend origins in production
-- **No PII storage**: Only public blockchain data
+1. Client asks `POST /api/v1/auth/challenge` for `(address, action, slug, target)`.
+2. Server returns a single-use token and a message naming the domain, the
+   action, the address, the profile, the target wallet where applicable, the
+   token, and an expiry — then holds it for five minutes.
+3. The wallet signs that message; the client submits the signature with the
+   mutation.
+4. Server verifies the ed25519 signature (raw or SEP-53 framing only — never
+   over a digest), checks action, slug and target all match, and consumes the
+   token.
 
-## MVP Scope
+Who may do what: any wallet **on** a profile can edit it; only the
+`owner_address` can delete it or approve a new wallet joining; adding a wallet
+takes two signatures (owner consent naming the exact address, plus the new
+wallet proving control); removing one takes the owner's or that wallet's own
+signature.
 
-### Phase 1 (4-6 weeks)
-- Account lookup by public key
-- XLM + trustline token balances with USD values
-- SDEX LP positions
-- Basic transaction history
-- Price data from SDEX + CoinGecko
-- Web dashboard
+## Hosting
 
-### Phase 2 (4-6 weeks)
-- Soroban DeFi position tracking (Blend, Soroswap)
-- Claimable balance monitoring
-- Portfolio history charts
-- Multi-wallet support
-- Freighter wallet connect
+Railway (`server: railway-hikari`), Node 22, `node prototype/server.js` from the
+root `package.json`. No Dockerfile — Railway auto-detects. Live at
+`stellarscope.xyz`, also reachable at `stellarscope-production.up.railway.app`.
 
-### Phase 3 (4-6 weeks)
-- NFT gallery
-- Mobile app (React Native)
-- Push notifications (large balance changes)
-- Protocol-level analytics (TVL, user counts)
-- Public API for third-party integrations
+## Tests
+
+`npm test` in `prototype/` runs `node --test` — no test framework dependency.
+CI runs the suite plus `npm audit --audit-level=high` on every PR.
+
+Coverage is deliberately concentrated on what breaks quietly: profile-auth
+signature verification, the profile routes' authorization, the write-path
+guards, input filtering, security headers, and source-level guardrails over
+`index.html` (no interpolated inline handlers, one escaper, every interpolated
+URL through `safeUrl`).

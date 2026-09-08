@@ -30,25 +30,28 @@
 <h2>1. Read-Only by Design</h2>
 <p>The Service does not custody, hold, send, receive, or sign transactions involving your funds. All on-chain data it displays is fetched from publicly accessible endpoints (such as the Stellar Horizon API). There is no functionality within the Service that requires a private key.</p>
 
-<h2>2. Wallet Connection (Freighter)</h2>
-<p>If you use the optional "Connect Freighter" feature, signing — should any signing flow be added in the future — occurs entirely within the Freighter browser extension. The Service receives only the public address you authorize Freighter to share. The Service never sees, requests, or stores secret keys, recovery phrases, or signed-transaction material.</p>
+<h2>2. Wallet Connection</h2>
+<p>The Service connects to Freighter, LOBSTR, Albedo, Hana and Rabet through the Stellar Wallets Kit, which is served from this site rather than from a third-party CDN. The Service receives only the public address you authorize your wallet to share. It never sees, requests, or stores secret keys, recovery phrases, or signed-transaction material.</p>
 
-<h2>3. Transport Security</h2>
+<h2>3. Message Signing for Public Profiles</h2>
+<p>Correcting an earlier version of this page, which said no signing flow existed: there is one, and it signs a <em>message</em>, never a transaction. If you create a public profile page, the Service asks your wallet to sign a short authorization message to prove you control the wallet you are claiming. That message names this domain, the action being authorized, the profile it applies to, a single-use random token, and an expiry, so a signature collected for one action cannot be reused for another. It authorizes nothing on-chain and moves no funds. All signing happens inside your wallet.</p>
+
+<h2>4. Transport Security</h2>
 <p>Traffic between your browser and the Service is served over HTTPS. Queries to the Stellar Horizon API and similar public data sources are also made over HTTPS.</p>
 
-<h2>4. Open Source</h2>
+<h2>5. Open Source</h2>
 <p>The Service is open source. Its full source code is available for inspection at <a href="https://github.com/kebkoether/moonshot_bank">github.com/kebkoether/moonshot_bank</a>. We encourage independent review.</p>
 
-<h2>5. Third-Party Risk</h2>
+<h2>6. Third-Party Risk</h2>
 <p>The Service depends on third-party infrastructure including the Stellar Horizon API, public price oracles, and the Freighter wallet extension. Availability and correctness of displayed data depend on those services. The Service does not control, and is not responsible for, third-party security practices.</p>
 
-<h2>6. Prototype Status</h2>
+<h2>7. Prototype Status</h2>
 <p>The Service is a hackathon-stage prototype. It has not undergone formal security audit. Users should treat all displayed information as informational, and should verify critical balances or transactions independently using a trusted explorer or wallet before relying on them.</p>
 
-<h2>7. Reporting a Vulnerability</h2>
+<h2>8. Reporting a Vulnerability</h2>
 <p>If you believe you have found a security vulnerability in the Service, please report it by opening a <em>private</em> security advisory on the project's GitHub repository: <a href="https://github.com/kebkoether/moonshot_bank/security/advisories">github.com/kebkoether/moonshot_bank/security/advisories</a>. Please do not disclose the issue publicly until it has been addressed.</p>
 
-<h2>8. What to Do If Something Looks Wrong</h2>
+<h2>9. What to Do If Something Looks Wrong</h2>
 <p>If the Service displays unexpected balances or activity for a wallet you control, this is a display issue — not a movement of your funds. Verify the wallet's true state using a trusted source such as <a href="https://stellar.expert">stellar.expert</a> or your wallet of record. If you have questions, open an issue on GitHub.</p>
 </body>
 </html>

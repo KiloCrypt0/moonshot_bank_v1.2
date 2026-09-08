@@ -6,3 +6,12 @@ data/
 *.db-shm
 .DS_Store
 **/.DS_Store
+
+# Node compile-cache directory that a Windows checkout committed by accident:
+# 597 files, 2.8 MB. The real directory name is NOT "C:\Users\..." — the drive
+# colon and backslashes were committed as private-use Unicode look-alikes
+# (U+F03A, U+F05C), which is why a plain "CUsersKLINTK*" glob does not match it
+# (the stale .dockerignore rule had exactly that bug). Match on the segment that
+# is real ASCII instead.
+**/node-compile-cache/
+prototype/C*Users*KLINTK*
